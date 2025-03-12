@@ -2,31 +2,76 @@ const dns = require('dns');
 const dgram = require('dgram');
 const fs = require('fs').promises;
 const readline = require('readline');
+const path = require('path');
 
-// Async function to read the domains.txt file and parse entries
+const DEFAULT_DNS = '178.22.122.100';
+const DOMAIN_FILE = 'domains.txt';
+const TXT_FILES_DIR = './';
+
+// Async function to read all domain mappings
 const readDomainsFile = async (filename) => {
     const domainMap = new Map();
 
-    const fileStream = await fs.open(filename);
-    const lineReader = readline.createInterface({
-        input: fileStream.createReadStream(),
-        crlfDelay: Infinity
-    });
+    try {
+        const fileStream = await fs.open(filename);
+        const lineReader = readline.createInterface({
+            input: fileStream.createReadStream(),
+            crlfDelay: Infinity
+        });
 
-    for await (const line of lineReader) {
-        if (line.trim() === '' || line.startsWith('#')) continue; // Skip empty lines and comments
+        for await (const line of lineReader) {
+            if (line.trim() === '' || line.startsWith('#')) continue; // Skip empty lines and comments
 
-        const parts = line.split(/\s+/);
-        if (parts.length < 2) continue; // Malformed line, skip
+            const parts = line.split(/\s+/);
+            if (parts.length < 2) continue; // Malformed line, skip
 
-        const domainRegex = parts[0];
-        const ips = parts.slice(1);
+            const domainRegex = parts[0];
+            const ips = parts.slice(1);
 
-        domainMap.set(domainRegex, ips);
+            domainMap.set(domainRegex, ips);
+        }
+
+        await fileStream.close();
+    } catch (err) {
+        console.error(`Error reading ${filename}: ${err.message}`);
     }
 
-    await fileStream.close();
     return domainMap;
+};
+
+// Read all custom DNS files (e.g., "178.22.122.100.txt")
+const readCustomDNSFiles = async (directory = TXT_FILES_DIR) => {
+    const customDNSMap = new Map();
+
+    try {
+        const files = await fs.readdir(directory);
+        for (const file of files) {
+            if (file.endsWith('.txt') && file !== DOMAIN_FILE) {
+                const dnsIP = file.replace('.txt', '');
+                const domains = new Set();
+
+                const fileStream = await fs.open(path.join(directory, file));
+                const lineReader = readline.createInterface({
+                    input: fileStream.createReadStream(),
+                    crlfDelay: Infinity
+                });
+
+                for await (const line of lineReader) {
+                    const domain = line.trim();
+                    if (domain && !domain.startsWith('#')) {
+                        domains.add(domain);
+                    }
+                }
+
+                await fileStream.close();
+                customDNSMap.set(dnsIP, domains);
+            }
+        }
+    } catch (err) {
+        console.error(`Error reading custom DNS files: ${err.message}`);
+    }
+
+    return customDNSMap;
 };
 
 const parseDomainName = (message) => {
@@ -39,10 +84,15 @@ const parseDomainName = (message) => {
         offset += length + 1;
     }
 
-    return domainName.slice(0, -1); // Remove the trailing dot
+    return domainName.slice(0, -1); // Remove trailing dot
 };
 
 const buildResponse = (query, domainName, domainMap) => {
+    if (!domainMap) {
+        console.error('Error: domainMap is undefined in buildResponse()');
+        return Buffer.alloc(0);
+    }
+
     let ipAddresses = [];
 
     for (const [domainRegex, ips] of domainMap.entries()) {
@@ -55,12 +105,12 @@ const buildResponse = (query, domainName, domainMap) => {
     }
 
     if (ipAddresses.length === 0) {
-        console.error(`Domain ${domainName} not found in domains.txt`);
+        console.error(`Domain ${domainName} not found in ${DOMAIN_FILE}`);
         return Buffer.alloc(0); // Empty response for not found domains
     }
 
-    const response = Buffer.alloc(512); // Allocate buffer for response
-    query.copy(response, 0, 0, 12); // Copy the query header into the response header
+    const response = Buffer.alloc(512);
+    query.copy(response, 0, 0, 12); // Copy query header
     response.writeUInt16BE(0x8180, 2); // Standard query response, no error
     response.writeUInt16BE(1, 4); // Questions count
     response.writeUInt16BE(ipAddresses.length, 6); // Answer count
@@ -80,7 +130,7 @@ const buildResponse = (query, domainName, domainMap) => {
     offset += 4;
 
     ipAddresses.forEach((ip) => {
-        response.writeUInt16BE(0xC00C, offset); // Name (offset to the domain name in the query)
+        response.writeUInt16BE(0xC00C, offset); // Name offset
         offset += 2;
         response.writeUInt16BE(1, offset); // Type A record
         response.writeUInt16BE(1, offset + 2); // Class IN
@@ -107,8 +157,6 @@ const forwardToExternalDNS = (message, remote, server, externalDNSServer) => {
             server.send(responseMessage, 0, responseMessage.length, remote.port, remote.address, (err) => {
                 if (err) {
                     console.error(`Error sending response to ${remote.address}:${remote.port}: ${err.message}`);
-                } else {
-                    console.log(`Forwarded response sent to ${remote.address}:${remote.port}`);
                 }
             });
             client.close();
@@ -116,34 +164,41 @@ const forwardToExternalDNS = (message, remote, server, externalDNSServer) => {
     });
 };
 
-const handleRequest = async (message, remote, server, domainMap, externalDNSServer) => {
-    const domainName = parseDomainName(message); // Extract domain name from DNS query message
-    const response = buildResponse(message, domainName, domainMap); // Pass the domainMap to buildResponse
-
+const handleRequest = async (message, remote, server, domainMap, customDNSMap, defaultDNSServer) => {
+    const domainName = parseDomainName(message);
     console.log(`domainName: ${domainName}`);
 
+    // 1. Check in `DOMAIN_FILE`
+    const response = buildResponse(message, domainName, domainMap);
     if (response.length > 0) {
-        server.send(response, 0, response.length, remote.port, remote.address, (err) => {
-            if (err) {
-                console.error(`Error sending response to ${remote.address}:${remote.port}: ${err.message}`);
-            } else {
-                console.log(`Response sent to ${remote.address}:${remote.port}`);
-            }
-        });
-    } else {
-        console.log(`Forwarding request for ${domainName} to external DNS server ${externalDNSServer}`);
-        forwardToExternalDNS(message, remote, server, externalDNSServer);
+        server.send(response, 0, response.length, remote.port, remote.address);
+        return;
     }
+
+    // 2. Check in custom DNS files
+    for (const [dnsServer, domains] of customDNSMap.entries()) {
+        for (const domainRegex of domains) {
+            const regex = new RegExp(domainRegex, 'i');
+            if (regex.test(domainName)) {
+                console.log(`Resolving ${domainName} using custom DNS server ${dnsServer}`);
+                forwardToExternalDNS(message, remote, server, dnsServer);
+                return;
+            }
+        }
+    }
+
+    // 3. Fallback to default DNS
+    console.log(`Forwarding ${domainName} to default DNS server ${defaultDNSServer}`);
+    forwardToExternalDNS(message, remote, server, defaultDNSServer);
 };
 
 const startServer = async () => {
-    const domainMap = await readDomainsFile('domains.txt');
+    const domainMap = await readDomainsFile(DOMAIN_FILE);
+    const customDNSMap = await readCustomDNSFiles(); // Read all custom DNS mappings
 
-    // Create DNS server
     const server = dgram.createSocket('udp4');
-
     server.on('message', (message, remote) => {
-        handleRequest(message, remote, server, domainMap, '8.8.8.8');
+        handleRequest(message, remote, server, domainMap, customDNSMap, DEFAULT_DNS); // Default DNS
     });
 
     server.on('error', (err) => {
@@ -152,8 +207,7 @@ const startServer = async () => {
     });
 
     server.on('listening', () => {
-        const address = server.address();
-        console.log(`DNS server listening on ${address.address}:${address.port}`);
+        console.log(`DNS server listening on 0.0.0.0:53`);
     });
 
     server.bind(53);
