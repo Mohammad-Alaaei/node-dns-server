@@ -4,40 +4,32 @@ const fs = require('fs').promises;
 const readline = require('readline');
 const path = require('path');
 
-const DEFAULT_DNS = '178.22.122.100';
+const DEFAULT_DNS = '178.22.122.101';
 const DOMAIN_FILE = 'domains.txt';
 const TXT_FILES_DIR = './';
 
 // Async function to read all domain mappings
 const readDomainsFile = async (filename) => {
     const domainMap = new Map();
-
     try {
-        const fileStream = await fs.open(filename);
-        const lineReader = readline.createInterface({
-            input: fileStream.createReadStream(),
-            crlfDelay: Infinity
-        });
+        const data = await fs.readFile(filename, 'utf8');
+        const lines = data.split('\n');
 
-        for await (const line of lineReader) {
-            if (line.trim() === '' || line.startsWith('#')) continue; // Skip empty lines and comments
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue; // Skip empty lines and comments
 
-            const parts = line.split(/\s+/);
-            if (parts.length < 2) continue; // Malformed line, skip
+            const parts = trimmed.split(/\s+/);
+            if (parts.length < 2) continue;
 
-            const domainRegex = parts[0];
-            const ips = parts.slice(1);
-
-            domainMap.set(domainRegex, ips);
+            domainMap.set(parts[0], parts.slice(1)); // First is regex, rest are IPs
         }
-
-        await fileStream.close();
     } catch (err) {
         console.error(`Error reading ${filename}: ${err.message}`);
     }
-
     return domainMap;
 };
+
 
 // Read all custom DNS files (e.g., "178.22.122.100.txt")
 const readCustomDNSFiles = async (directory = TXT_FILES_DIR) => {
@@ -45,34 +37,25 @@ const readCustomDNSFiles = async (directory = TXT_FILES_DIR) => {
 
     try {
         const files = await fs.readdir(directory);
-        for (const file of files) {
-            if (file.endsWith('.txt') && file !== DOMAIN_FILE) {
+        const readPromises = files
+            .filter(file => file.endsWith('.txt') && file !== DOMAIN_FILE)
+            .map(async (file) => {
                 const dnsIP = file.replace('.txt', '');
-                const domains = new Set();
-
-                const fileStream = await fs.open(path.join(directory, file));
-                const lineReader = readline.createInterface({
-                    input: fileStream.createReadStream(),
-                    crlfDelay: Infinity
-                });
-
-                for await (const line of lineReader) {
-                    const domain = line.trim();
-                    if (domain && !domain.startsWith('#')) {
-                        domains.add(domain);
-                    }
-                }
-
-                await fileStream.close();
+                const data = await fs.readFile(path.join(directory, file), 'utf8');
+                const domains = new Set(
+                    data.split('\n').map(line => line.trim()).filter(line => line && !line.startsWith('#'))
+                );
                 customDNSMap.set(dnsIP, domains);
-            }
-        }
+            });
+
+        await Promise.all(readPromises);
     } catch (err) {
         console.error(`Error reading custom DNS files: ${err.message}`);
     }
 
     return customDNSMap;
 };
+
 
 const parseDomainName = (message) => {
     let domainName = '';
@@ -93,6 +76,11 @@ const buildResponse = (query, domainName, domainMap) => {
         return Buffer.alloc(0);
     }
 
+    if (domainName === '1.0.0.127.in-addr.arpa') {
+        console.log('Handling reverse lookup for 127.0.0.1');
+        return buildPTRResponse(query, 'localhost');
+    }
+
     let ipAddresses = [];
 
     for (const [domainRegex, ips] of domainMap.entries()) {
@@ -109,6 +97,10 @@ const buildResponse = (query, domainName, domainMap) => {
         return Buffer.alloc(0); // Empty response for not found domains
     }
 
+    return buildARecordResponse(query, domainName, ipAddresses);
+};
+
+const buildARecordResponse = (query, domainName, ipAddresses) => {
     const response = Buffer.alloc(512);
     query.copy(response, 0, 0, 12); // Copy query header
     response.writeUInt16BE(0x8180, 2); // Standard query response, no error
@@ -142,7 +134,38 @@ const buildResponse = (query, domainName, domainMap) => {
         });
     });
 
-    return response.slice(0, offset);
+    return response.subarray(0, offset);
+};
+
+const buildPTRResponse = (query, hostname) => {
+    const response = Buffer.alloc(512);
+    query.copy(response, 0, 0, 12); // Copy query header
+    response.writeUInt16BE(0x8180, 2); // Standard query response, no error
+    response.writeUInt16BE(1, 4); // Questions count
+    response.writeUInt16BE(1, 6); // Answer count
+    response.writeUInt16BE(0, 8); // Authority RR count
+    response.writeUInt16BE(0, 10); // Additional RR count
+
+    let offset = 12;
+    response.writeUInt16BE(0xC00C, offset); // Name offset
+    offset += 2;
+    response.writeUInt16BE(12, offset); // Type PTR
+    response.writeUInt16BE(1, offset + 2); // Class IN
+    response.writeUInt32BE(60, offset + 4); // TTL
+    offset += 8;
+
+    const parts = hostname.split('.');
+    response.writeUInt16BE(hostname.length + 2, offset); // RDLength
+    offset += 2;
+
+    parts.forEach((part) => {
+        response.writeUInt8(part.length, offset++);
+        response.write(part, offset, part.length, 'ascii');
+        offset += part.length;
+    });
+    response.writeUInt8(0, offset++); // Null byte
+
+    return response.subarray(0, offset);
 };
 
 const forwardToExternalDNS = (message, remote, server, externalDNSServer) => {
@@ -166,7 +189,14 @@ const forwardToExternalDNS = (message, remote, server, externalDNSServer) => {
 
 const handleRequest = async (message, remote, server, domainMap, customDNSMap, defaultDNSServer) => {
     const domainName = parseDomainName(message);
+    console.log('=============')
     console.log(`domainName: ${domainName}`);
+
+    // Ignore reverse DNS lookups
+    if (domainName.endsWith('.in-addr.arpa')) {
+        console.log(`Ignoring reverse lookup for ${domainName}`);
+        return;
+    }
 
     // 1. Check in `DOMAIN_FILE`
     const response = buildResponse(message, domainName, domainMap);
@@ -192,6 +222,7 @@ const handleRequest = async (message, remote, server, domainMap, customDNSMap, d
     forwardToExternalDNS(message, remote, server, defaultDNSServer);
 };
 
+
 const startServer = async () => {
     const domainMap = await readDomainsFile(DOMAIN_FILE);
     const customDNSMap = await readCustomDNSFiles(); // Read all custom DNS mappings
@@ -207,10 +238,11 @@ const startServer = async () => {
     });
 
     server.on('listening', () => {
-        console.log(`DNS server listening on 0.0.0.0:53`);
+        const address = server.address();
+        console.log(`DNS server listening on ${address.address}:${address.port}`);
     });
 
-    server.bind(53);
+    server.bind(53, '127.0.0.1');
 };
 
 startServer().catch(err => console.error(`Failed to start server: ${err.message}`));
