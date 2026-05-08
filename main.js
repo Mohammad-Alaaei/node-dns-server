@@ -1,6 +1,7 @@
 const dgram = require('dgram');
 const fs = require('fs').promises;
 const path = require('path');
+const logger = require('./logger');
 
 const DEFAULT_DNS = '178.22.122.101';
 const DOMAIN_FILE = 'domains.txt';
@@ -235,11 +236,12 @@ const forwardToExternalDNS = (message, remote, server, externalDNSServer) => {
                 const ipFromExternal = parseARecord(responseMessage);
                 if (ipFromExternal) {
                     console.log(`Resolved by external DNS: ${parsedDomainName} → ${ipFromExternal}`);
+                    logger.upsertDomain(parsedDomainName, [ipFromExternal]);
                 } else {
-                    console.warn(`No A record found in upstream reply for ${parsedDomainName}`);
+                    console.warn(`No A record found for ${parsedDomainName}`);
                 }
             } catch (err) {
-                console.error(`Error during parsing resolved ip address for ${parsedDomainName}`, err);
+                console.error(`Error parsing upstream reply for ${parsedDomainName}`, err);
             }
 
             server.send(
@@ -248,7 +250,7 @@ const forwardToExternalDNS = (message, remote, server, externalDNSServer) => {
                 responseMessage.length,
                 remote.port,
                 remote.address,
-                (err) => {
+                err => {
                     if (err) {
                         console.error(`Error sending response to ${remote.address}:${remote.port}: ${err.message}`);
                     }
@@ -320,4 +322,6 @@ const startServer = async () => {
     server.bind(53, '127.0.0.1');
 };
 
+// Bootstrap
+logger.init();
 startServer().catch(err => console.error(`Failed to start server: ${err.message}`));
