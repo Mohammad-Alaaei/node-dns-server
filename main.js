@@ -1,7 +1,5 @@
-const dns = require('dns');
 const dgram = require('dgram');
 const fs = require('fs').promises;
-const readline = require('readline');
 const path = require('path');
 
 const DEFAULT_DNS = '178.22.122.101';
@@ -55,6 +53,55 @@ const readCustomDNSFiles = async (directory = TXT_FILES_DIR) => {
 
     return customDNSMap;
 };
+
+
+/**
+ * Pull out the first A‑record IP from an upstream DNS reply.
+ *
+ * @param {Buffer} msg - Full UDP payload received from external DNS.
+ * @returns {string|null}  The IP address (e.g., "216.239.38.120") or null if none found.
+ */
+function parseARecord(msg) {
+    // Header is 12 bytes; skip it
+    let offset = 12;
+
+    // Skip the question section(s)
+    const qCount = msg.readUInt16BE(4);
+    for (let i = 0; i < qCount; i++) {
+        while (msg[offset] !== 0) {           // name part not null‑terminated
+            offset += msg[offset] + 1;
+        }
+        offset++;              // null byte that ends the query name
+        offset += 4;          // type, class of the *question*
+    }
+
+    if (offset + 10 > msg.length) return null;   // Not enough data for an answer
+
+    // Read the first RR (the one we just wrote)
+    const rrType = msg.readUInt16BE(offset);      // should be 1 (A)
+    // console.log(`RR-Type: ${rrType}`);
+
+    const isValidRecord = [1, 49164, 49168].includes(rrType);
+    if (!isValidRecord) {
+        console.log('Invalid RR-Type, skiping...');
+        return null;
+    }
+
+    offset += 2;                                  // name pointer (0xC00C)
+    offset += 4;                                  // class IN
+    offset += 4;                                  // TTL
+    const rdLength = msg.readUInt16BE(offset);     // RDLENGTH – should be 4
+    // console.log(`RD-Length: ${rdLength}`);
+    if (rdLength !== 4) return null;
+    offset += 2;
+
+    // The IP address is exactly four bytes after this point
+    const ipBytes = [];
+    for (let i = 0; i < 4; i++) {
+        ipBytes.push(msg.readUInt8(offset++));
+    }
+    return ipBytes.join('.');
+}
 
 
 const parseDomainName = (message) => {
@@ -177,15 +224,41 @@ const forwardToExternalDNS = (message, remote, server, externalDNSServer) => {
             return;
         }
         client.on('message', (responseMessage) => {
-            server.send(responseMessage, 0, responseMessage.length, remote.port, remote.address, (err) => {
-                if (err) {
-                    console.error(`Error sending response to ${remote.address}:${remote.port}: ${err.message}`);
+            const parsedDomainName = parseDomainName(message);
+
+            // Log the raw response for debugging
+            // const hex = responseMessage.toString('hex').match(/.{1,2}/g).join(' ');
+            // console.log(`Upstream reply (${externalDNSServer}): ${hex}`);
+
+            // Pull out the first A‑record (if any)
+            try {
+                const ipFromExternal = parseARecord(responseMessage);
+                if (ipFromExternal) {
+                    console.log(`Resolved by external DNS: ${parsedDomainName} → ${ipFromExternal}`);
+                } else {
+                    console.warn(`No A record found in upstream reply for ${parsedDomainName}`);
                 }
-            });
+            } catch (err) {
+                console.error(`Error during parsing resolved ip address for ${parsedDomainName}`, err);
+            }
+
+            server.send(
+                responseMessage,
+                0,
+                responseMessage.length,
+                remote.port,
+                remote.address,
+                (err) => {
+                    if (err) {
+                        console.error(`Error sending response to ${remote.address}:${remote.port}: ${err.message}`);
+                    }
+                }
+            );
             client.close();
         });
     });
 };
+
 
 const handleRequest = async (message, remote, server, domainMap, customDNSMap, defaultDNSServer) => {
     const domainName = parseDomainName(message);
@@ -211,6 +284,7 @@ const handleRequest = async (message, remote, server, domainMap, customDNSMap, d
             const regex = new RegExp(domainRegex, 'i');
             if (regex.test(domainName)) {
                 console.log(`Resolving ${domainName} using custom DNS server ${dnsServer}`);
+                console.log('=============')
                 forwardToExternalDNS(message, remote, server, dnsServer);
                 return;
             }
@@ -219,6 +293,7 @@ const handleRequest = async (message, remote, server, domainMap, customDNSMap, d
 
     // 3. Fallback to default DNS
     console.log(`Forwarding ${domainName} to default DNS server ${defaultDNSServer}`);
+    console.log('=============')
     forwardToExternalDNS(message, remote, server, defaultDNSServer);
 };
 
