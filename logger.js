@@ -5,6 +5,12 @@ const fs = require('fs').promises;
 --------------------------------------------------------------------- */
 const LOG_FILE = 'resolved.log';          // file used to persist mappings
 const FLUSH_INTERVAL_MS = 60_000;         // 1 minute
+const IGNORE_LIST = [
+    '10.10.34.35',
+    '10.10.34.34',
+    '10.10.34.36',
+    '0.0.0.0',
+]
 
 // In‑memory set of "<domain>|<ip>" strings
 const seenMap = new Map();
@@ -46,7 +52,15 @@ async function flushSeen() {
 
 /** Add or replace a mapping for a domain. */
 function upsertDomain(domain, ipsArray) {
-    seenMap.set(domain, new Set(ipsArray));
+    let filteredIPs = [];
+    for (const ip of ipsArray) {
+        if (IGNORE_LIST.includes(ip)) {
+            continue;
+        }
+
+        filteredIPs.push(ip)
+    }
+    seenMap.set(domain, new Set(filteredIPs));
 }
 
 /* --------------------------------------------------------------------
