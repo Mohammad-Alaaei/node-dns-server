@@ -60,7 +60,9 @@ function upsertDomain(domain, ipsArray) {
 
         filteredIPs.push(ip)
     }
-    seenMap.set(domain, new Set(filteredIPs));
+    if (filteredIPs.length > 0) {
+        seenMap.set(domain, new Set(filteredIPs));
+    }
 }
 
 /* --------------------------------------------------------------------
