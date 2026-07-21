@@ -1,13 +1,25 @@
-const dgram = require('dgram');
+require("dotenv").config();
+
+const dgram = require('node:dgram');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('./logger');
 
-const DEFAULT_DNS = '178.22.122.101';
-const DOMAIN_FILE = 'domains.txt';
-const TXT_FILES_DIR = './';
+// initial config
+const DEFAULT_DNS = process.env.DEFAULT_DNS ?? '4.2.2.4';
+const DOMAIN_FILE = process.env.DOMAIN_FILE ?? 'domains.txt';
+const TXT_FILES_DIR = process.env.TXT_FILES_DIR ?? './';
 
-// Async function to read all domain mappings
+const SERVER_IP = process.env.SERVER_IP ?? "127.0.0.1";
+const SERVER_PORT = process.env.SERVER_PORT ?? 53;
+
+
+/**
+ * Async function to read all domain mappings
+ * 
+ * @param {string} filename 
+ * @returns {Map<any, any>} Map of domains and related IPs
+ */
 const readDomainsFile = async (filename) => {
     const domainMap = new Map();
     try {
@@ -319,9 +331,12 @@ const startServer = async () => {
         console.log(`DNS server listening on ${address.address}:${address.port}`);
     });
 
-    server.bind(53, '127.0.0.1');
+    server.bind(SERVER_PORT, SERVER_IP);
 };
 
-// Bootstrap
-logger.init();
-startServer().catch(err => console.error(`Failed to start server: ${err.message}`));
+const main = () => {
+    logger.init();
+    startServer().catch(err => console.error(`Failed to start server: ${err.message}`));
+}
+
+main();

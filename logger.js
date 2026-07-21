@@ -3,14 +3,9 @@ const fs = require('fs').promises;
 /* --------------------------------------------------------------------
    Logger helpers: load, flush, add
 --------------------------------------------------------------------- */
-const LOG_FILE = 'resolved.log';          // file used to persist mappings
-const FLUSH_INTERVAL_MS = 60_000;         // 1 minute
-const IGNORE_LIST = [
-    '10.10.34.35',
-    '10.10.34.34',
-    '10.10.34.36',
-    '0.0.0.0',
-]
+const LOG_FILE = process.env.LOG_FILE ?? 'resolved.log';          // file used to persist mappings
+const FLUSH_INTERVAL_MS = process.env.FLUSH_INTERVAL_MS ?? 60_000;         // 1 minute
+const IGNORE_LIST = process.env.IGNORE_LIST?.split(' ') ?? [];
 
 // In‑memory set of "<domain>|<ip>" strings
 const seenMap = new Map();
