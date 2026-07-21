@@ -47,17 +47,17 @@ example\.com
 
 just execute 'run.bat' file
 or
-open a command-prompt (cmd), change directory to where this server files are in and run 'main.js':
+open a command-prompt (cmd), change directory to where this server files are in and run 'main.mjs':
 
 ```cmd
 cd YOUR/SERVER/DIRECTORY
-node main.js
+node main.mjs
 ```
 
 ##### in linux
 
-just go to where is server files located in and run 'main.js':
+just go to where is server files located in and run 'main.mjs':
 
 ```cmd
-node main.js
+node main.mjs
 ```
