@@ -34,14 +34,12 @@ create a text file (.txt) and rename it to your prefered dns server ip address. 
 8.8.8.8.txt
 ```
 
-
 inside this file, write each domain in new line and with regex format. for example:
 
 ```txt
 example\.com
 .*\.example\.com
 ```
-
 
 ### 5- run server
 
