@@ -1,14 +1,15 @@
 {
   "name": "simple_dns_server",
-  "version": "1.0.0",
-  "main": "main.js",
+  "version": "2.0.0",
+  "main": "main.mjs",
   "scripts": {
-    "start": "node main.js"
+    "start": "node main.mjs"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Mohammad V. Alaaei (MVA)",
+  "license": "GPL-3.0-only",
   "description": "",
   "dependencies": {
+    "dns2": "^3.0.0",
     "dotenv": "^17.4.2"
   }
 }
