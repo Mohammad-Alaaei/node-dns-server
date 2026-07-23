@@ -19,8 +19,6 @@ const CACHE_LEVELS = {
     'FILTERED_ONLY': 'FILTERED_ONLY',
     'NONE': 'NONE',
 }
-const SERVER_REVERSE_IP = SERVER_IP.split('.').reverse().join('.');
-
 
 const DEFAULT_DNS = process.env.DEFAULT_DNS ?? '4.2.2.4';
 const DOMAIN_FILE = process.env.DOMAIN_FILE ?? 'domains.txt';
@@ -36,6 +34,8 @@ const DNS_TTL = Number(process.env.DNS_TTL ?? 60);
 const CACHE_LEVEL = process.env.CACHE_LEVEL ?? CACHE_LEVELS.CUSTOM_ONLY;
 
 const DEBUG_PREFIX = process.env.DEBUG_PREFIX ?? '_.';
+
+const SERVER_REVERSE_IP = SERVER_IP.split('.').reverse().join('.');
 
 /* -------------------------------------------------------------------------- */
 /*                               Global State                                 */
