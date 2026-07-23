@@ -237,7 +237,7 @@ function appendDebugRecords(packet, request, info) {
 
     for (const record of records) {
         packet.additionals.push({
-            name: `_.${request.questions[0].name}`,
+            name: `${DEBUG_PREFIX}${request.questions[0].name}`,
             type: Packet.TYPE.TXT,
             class: Packet.CLASS.IN,
             ttl: DNS_TTL,
@@ -490,7 +490,7 @@ async function handleExternalRequests(request, message, domain, type = null, deb
     // match the response from external server to match original requested domain (with prefix) to avoid domain miss-match error
     if (debug) {
         const answers = [];
-        const debugName = `_.${domain}`;
+        const debugName = `${DEBUG_PREFIX}${domain}`;
 
         response.packet.questions[0].name = debugName;
 
@@ -701,7 +701,7 @@ async function handleRequest(message, remote) {
         let debug = false;
         let domain = question.name;
 
-        if (domain.startsWith('_.')) {
+        if (domain.startsWith(DEBUG_PREFIX)) {
             debug = true;
             domain = domain.substring(2);
         }
