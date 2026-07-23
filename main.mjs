@@ -16,7 +16,7 @@ import * as logger from './logger.mjs';
 const DEFAULT_DNS = process.env.DEFAULT_DNS ?? '4.2.2.4';
 const DOMAIN_FILE = process.env.DOMAIN_FILE ?? 'domains.txt';
 const TXT_FILES_DIR = process.env.TXT_FILES_DIR ?? './';
-const PTR_HOSTNAME = process.env.PTR_HOSTNAME ?? 'localhost123.com';
+const PTR_HOSTNAME = process.env.PTR_HOSTNAME ?? 'localhost.com';
 
 const SERVER_IP = process.env.SERVER_IP ?? '127.0.0.1';
 const SERVER_PORT = Number(process.env.SERVER_PORT ?? 53);
