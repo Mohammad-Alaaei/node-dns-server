@@ -13,6 +13,15 @@ import * as logger from './logger.mjs';
 /*                                  Constants                                 */
 /* -------------------------------------------------------------------------- */
 
+const CACHE_LEVELS = {
+    'ALL': 'ALL',
+    'CUSTOM_ONLY': 'CUSTOM_ONLY',
+    'FILTERED_ONLY': 'FILTERED_ONLY',
+    'NONE': 'NONE',
+}
+const SERVER_REVERSE_IP = SERVER_IP.split('.').reverse().join('.');
+
+
 const DEFAULT_DNS = process.env.DEFAULT_DNS ?? '4.2.2.4';
 const DOMAIN_FILE = process.env.DOMAIN_FILE ?? 'domains.txt';
 const TXT_FILES_DIR = process.env.TXT_FILES_DIR ?? './';
@@ -24,15 +33,9 @@ const SERVER_PORT = Number(process.env.SERVER_PORT ?? 53);
 const DNS_PORT = Number(process.env.DNS_PORT ?? 53);
 const DNS_TTL = Number(process.env.DNS_TTL ?? 60);
 
-const CACHE_LEVELS = {
-    'ALL': 'ALL',
-    'CUSTOM_ONLY': 'CUSTOM_ONLY',
-    'FILTERED_ONLY': 'FILTERED_ONLY',
-    'NONE': 'NONE',
-}
 const CACHE_LEVEL = process.env.CACHE_LEVEL ?? CACHE_LEVELS.CUSTOM_ONLY;
 
-const SERVER_REVERSE_IP = SERVER_IP.split('.').reverse().join('.');
+const DEBUG_PREFIX = process.env.DEBUG_PREFIX ?? '_.';
 
 /* -------------------------------------------------------------------------- */
 /*                               Global State                                 */
@@ -208,13 +211,49 @@ function findCustomDnsServer(domain) {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Appends TXT debug records to a DNS packet.
+ *
+ * @param {object} packet dns2 Packet.
+ * @param {object} request Parsed request.
+ * @param {{
+ *   resolver: string,
+ *   server: string,
+ *   type: string,
+ *   answers: string[]
+ * }} info
+ */
+function appendDebugRecords(packet, request, info) {
+    if (!packet.additionals) {
+        packet.additionals = [];
+    }
+
+    const records = [
+        `Resolver=${info.resolver}`,
+        `Server=${info.server}`,
+        `Type=${info.type}`,
+        `Count=${info.answers.length}`,
+        ...info.answers.map(value => `Answer=${value}`)
+    ];
+
+    for (const record of records) {
+        packet.additionals.push({
+            name: `_.${request.questions[0].name}`,
+            type: Packet.TYPE.TXT,
+            class: Packet.CLASS.IN,
+            ttl: DNS_TTL,
+            data: record
+        });
+    }
+}
+
+/**
  * Creates a DNS response containing one or more IPv4 addresses.
  *
  * @param {object} request Parsed dns2 request.
  * @param {string[]} ips IPv4 addresses.
- * @returns {Buffer}
+ * @returns {object} dns2 Packet.
  */
-function createLocalResponse(request, ips) {
+function createLocalResponse(request, ips, debug = false) {
     const response = Packet.createResponseFromRequest(request);
 
     for (const ip of ips) {
@@ -258,7 +297,7 @@ function createPtrResponse(request, hostname) {
  * type (currently AAAA).
  *
  * @param {object} request Parsed dns2 request.
- * @returns {Buffer}
+ * @returns {object} dns2 Packet.
  */
 function createEmptyResponse(request) {
     const response = Packet.createResponseFromRequest(request);
@@ -272,7 +311,10 @@ function createEmptyResponse(request) {
  * Sends a DNS response to the client.
  *
  * @param {import('node:dgram').RemoteInfo} remote
- * @param {{packet: object|null, buffer: Buffer|null}} response
+ * @param {{
+ *   packet: object|null,
+ *   buffer: Buffer|null
+ * }} response
  */
 function sendResponse(remote, response) {
     if (response.packet) {
@@ -333,7 +375,8 @@ function forwardToExternalDns(message, dnsServer, cacheResult = false) {
 
                 resolve({
                     packet,
-                    buffer: responseBuffer
+                    buffer: responseBuffer,
+                    server: dnsServer
                 });
             } catch (err) {
                 reject(err);
@@ -400,7 +443,20 @@ function logResolvedAddresses(packet, cacheResult = false) {
 /*                             Request Handlers                               */
 /* -------------------------------------------------------------------------- */
 
-async function handleExternalRequests(message, domain, type = null) {
+/**
+ * 
+ * @param {object} request Parsed dns2 request.
+ * @param {Buffer} message Original UDP packet.
+ * @param {string} domain
+ * @param {string|null} type
+ * @param {boolean} debug
+ * 
+ * @returns {Promise<{
+ *   packet: object|null,
+ *   buffer: Buffer|null
+ * }>}
+ */
+async function handleExternalRequests(request, message, domain, type = null, debug = false) {
     const dnsServer = findCustomDnsServer(domain) ?? DEFAULT_DNS;
 
     logger.info(`Forwarding ${type ? type + ' lookup' : 'query'} for ${domain} to ${dnsServer}`);
@@ -410,7 +466,80 @@ async function handleExternalRequests(message, domain, type = null) {
     const isCaching = !(CACHE_LEVEL === CACHE_LEVELS.NONE);
     const shouldCache = (CACHE_LEVEL === CACHE_LEVELS.CUSTOM_ONLY) ? isCustomServer : isCaching;
 
-    const response = await forwardToExternalDns(message, dnsServer, shouldCache);
+
+    let upstreamMessage = message;
+
+    // replace domain name without debug prefix and prepare it to send correctly to external server
+    if (debug) {
+        const originalName = request.questions[0].name;
+
+        request.questions[0].name = domain;
+
+        upstreamMessage = request.toBuffer();
+
+        request.questions[0].name = originalName;
+    }
+
+    const response = await forwardToExternalDns(
+        upstreamMessage,
+        dnsServer,
+        shouldCache
+    );
+
+
+    // match the response from external server to match original requested domain (with prefix) to avoid domain miss-match error
+    if (debug) {
+        const answers = [];
+        const debugName = `_.${domain}`;
+
+        response.packet.questions[0].name = debugName;
+
+        for (const answer of response.packet.answers) {
+            answer.name = debugName;
+
+            switch (answer.type) {
+                case Packet.TYPE.A:
+                case Packet.TYPE.AAAA:
+                    answers.push(answer.address);
+                    break;
+
+                case Packet.TYPE.PTR:
+                case Packet.TYPE.CNAME:
+                    answers.push(answer.domain);
+                    break;
+
+                case Packet.TYPE.MX:
+                    answers.push(answer.exchange);
+                    break;
+
+                case Packet.TYPE.TXT:
+                    answers.push(answer.data);
+                    break;
+            }
+        }
+
+        for (const authority of response.packet.authorities ?? []) {
+            authority.name = debugName;
+        }
+
+        for (const additional of response.packet.additionals ?? []) {
+            if (additional.type !== Packet.TYPE.OPT) {
+                additional.name = debugName;
+            }
+        }
+
+        appendDebugRecords(response.packet, request, {
+            resolver: dnsServer === DEFAULT_DNS ? 'Default' : 'Custom',
+            server: dnsServer,
+            type: type ?? 'UNKNOWN',
+            answers
+        });
+
+        return {
+            packet: response.packet,
+            buffer: null
+        };
+    }
 
     return {
         packet: null,
@@ -423,24 +552,36 @@ async function handleExternalRequests(message, domain, type = null) {
  *
  * @param {object} request Parsed dns2 request.
  * @param {Buffer} message Original UDP packet.
- * @returns {Promise<Buffer>}
+ * @returns {Promise<{
+ *   packet: object|null,
+ *   buffer: Buffer|null
+ * }>}
  */
-async function handleARequest(request, message) {
-    const domain = request.questions[0].name;
-
+async function handleARequest(request, message, domain, debug = false) {
     const localRule = findLocalDomain(domain);
 
     if (localRule) {
         logger.info(`FOUND: ${localRule.ips.join(', ')}`);
         console.log('=============');
 
+        const packet = createLocalResponse(request, localRule.ips);
+
+        if (debug) {
+            appendDebugRecords(packet, request, {
+                resolver: 'Local',
+                server: SERVER_IP,
+                type: 'A',
+                answers: localRule.ips
+            });
+        }
+
         return {
-            packet: createLocalResponse(request, localRule.ips),
+            packet,
             buffer: null
         };
     }
 
-    return handleExternalRequests(message, domain, 'A');
+    return handleExternalRequests(request, message, domain, 'A', debug);
 }
 
 /**
@@ -453,21 +594,33 @@ async function handleARequest(request, message) {
  *
  * @param {object} request Parsed dns2 request.
  * @param {Buffer} message Original UDP packet.
- * @returns {Promise<Buffer>}
+ * @returns {Promise<{
+ *   packet: object|null,
+ *   buffer: Buffer|null
+ * }>}
  */
-async function handleAAAARequest(request, message) {
-    const domain = request.questions[0].name;
-
+async function handleAAAARequest(request, message, domain, debug = false) {
     if (findLocalDomain(domain)) {
         logger.info(`Ignoring AAAA lookup for local domain ${domain}`);
 
+        const packet = createEmptyResponse(request);
+
+        if (debug) {
+            appendDebugRecords(packet, request, {
+                resolver: 'Local',
+                server: SERVER_IP,
+                type: 'AAAA',
+                answers: []
+            });
+        }
+
         return {
-            packet: createEmptyResponse(request),
+            packet,
             buffer: null
         };
     }
 
-    return handleExternalRequests(message, domain, 'AAAA');
+    return handleExternalRequests(request, message, domain, 'AAAA', debug);
 }
 
 /**
@@ -480,29 +633,52 @@ async function handleAAAARequest(request, message) {
  * @param {Buffer} message Original UDP packet.
  * @returns {Promise<{packet: object|null, buffer: Buffer|null}>}
  */
-async function handlePtrRequest(request, message) {
-    const domain = request.questions[0].name;
-
+async function handlePtrRequest(request, message, domain, debug = false) {
     if (domain === `${SERVER_REVERSE_IP}.in-addr.arpa`) {
+
+        const packet = createPtrResponse(request, PTR_HOSTNAME);
+
+        if (debug) {
+            appendDebugRecords(packet, request, {
+                resolver: 'Local',
+                server: SERVER_IP,
+                type: 'PTR',
+                answers: [PTR_HOSTNAME]
+            });
+        }
+
         return {
-            packet: createPtrResponse(request, PTR_HOSTNAME),
+            packet,
             buffer: null
         };
     }
 
-    return handleExternalRequests(message, domain, 'PTR');
+    return handleExternalRequests(
+        request,
+        message,
+        domain,
+        'PTR',
+        debug
+    );
 }
 
 /**
  * Handles all unsupported DNS record types by forwarding the request
  * to an upstream DNS server.
  *
- * @param {Buffer} message
+ * @param {object} request Parsed dns2 request.
+ * @param {Buffer} message Original UDP packet.
  * @param {string} domain
- * @returns {Promise<Buffer>}
+ * @param {string|null} type
+ * @param {boolean} debug
+ * 
+ * @returns {Promise<{
+ *   packet: object|null,
+ *   buffer: Buffer|null
+ * }>}
  */
-async function handleOtherRequest(message, domain) {
-    return handleExternalRequests(message, domain);
+async function handleOtherRequest(request, message, domain, type = null, debug = false) {
+    return handleExternalRequests(request, message, domain, type, debug);
 }
 
 /**
@@ -521,7 +697,14 @@ async function handleRequest(message, remote) {
         }
 
         const question = request.questions[0];
-        const domain = question.name;
+
+        let debug = false;
+        let domain = question.name;
+
+        if (domain.startsWith('_.')) {
+            debug = true;
+            domain = domain.substring(2);
+        }
 
         logger.info(`domainName: ${domain}`);
 
@@ -529,19 +712,19 @@ async function handleRequest(message, remote) {
 
         switch (question.type) {
             case Packet.TYPE.A:
-                response = await handleARequest(request, message);
+                response = await handleARequest(request, message, domain, debug);
                 break;
 
             case Packet.TYPE.AAAA:
-                response = await handleAAAARequest(request, message);
+                response = await handleAAAARequest(request, message, domain, debug);
                 break;
 
             case Packet.TYPE.PTR:
-                response = await handlePtrRequest(request, message);
+                response = await handlePtrRequest(request, message, domain, debug);
                 break;
 
             default:
-                response = await handleOtherRequest(message, domain);
+                response = await handleOtherRequest(request, message, domain, Packet.TYPE[question.type]);
                 break;
         }
 
