@@ -24,6 +24,14 @@ const SERVER_PORT = Number(process.env.SERVER_PORT ?? 53);
 const DNS_PORT = Number(process.env.DNS_PORT ?? 53);
 const DNS_TTL = Number(process.env.DNS_TTL ?? 60);
 
+const CACHE_LEVELS = {
+    'ALL': 'ALL',
+    'CUSTOM_ONLY': 'CUSTOM_ONLY',
+    'FILTERED_ONLY': 'FILTERED_ONLY',
+    'NONE': 'NONE',
+}
+const CACHE_LEVEL = process.env.CACHE_LEVEL ?? CACHE_LEVELS.CUSTOM_ONLY;
+
 const SERVER_REVERSE_IP = SERVER_IP.split('.').reverse().join('.');
 
 /* -------------------------------------------------------------------------- */
@@ -293,6 +301,8 @@ function sendResponse(remote, response) {
  *
  * @param {Buffer} message
  * @param {string} dnsServer
+ * @param {boolean} cacheResult
+ * 
  * @returns {Promise<{
  *   packet: object,
  *   buffer: Buffer
@@ -343,6 +353,7 @@ function forwardToExternalDns(message, dnsServer, cacheResult = false) {
  * Logs resolved resource records from an external DNS response.
  *
  * @param {object} packet Parsed dns2 packet.
+ * @param {boolean} cacheResult should cache or not
  */
 function logResolvedAddresses(packet, cacheResult = false) {
     if (!packet.answers.length) {
@@ -380,7 +391,7 @@ function logResolvedAddresses(packet, cacheResult = false) {
     }
 
     if (cacheResult && ips.length > 0) {
-        cacher.upsertDomain(domain, ips);
+        cacher.cache(domain, ips);
     }
     console.log('=============');
 }
@@ -395,7 +406,11 @@ async function handleExternalRequests(message, domain, type = null) {
     logger.info(`Forwarding ${type ? type + ' lookup' : 'query'} for ${domain} to ${dnsServer}`);
     console.log('=============');
 
-    const response = await forwardToExternalDns(message, dnsServer, dnsServer !== DEFAULT_DNS);
+    const isCustomServer = dnsServer !== DEFAULT_DNS;
+    const isCaching = !(CACHE_LEVEL === CACHE_LEVELS.NONE);
+    const shouldCache = (CACHE_LEVEL === CACHE_LEVELS.CUSTOM_ONLY) ? isCustomServer : isCaching;
+
+    const response = await forwardToExternalDns(message, dnsServer, shouldCache);
 
     return {
         packet: null,
@@ -614,7 +629,13 @@ process.once('unhandledRejection', async err => {
  */
 async function main() {
     await logger.init();
-    await cacher.init();
+
+    if (CACHE_LEVEL != CACHE_LEVELS.NONE) {
+        await cacher.init(CACHE_LEVEL === CACHE_LEVELS.CUSTOM_ONLY
+            ? CACHE_LEVELS.ALL
+            : CACHE_LEVELS.FILTERED_ONLY
+        );
+    }
 
     localDomains = await loadLocalDomains();
     customDnsServers = await loadCustomDnsServers();
