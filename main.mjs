@@ -86,7 +86,7 @@ async function loadLocalDomains() {
             try {
                 rules.push({
                     pattern,
-                    regex: new RegExp(pattern, 'i'),
+                    regex: new RegExp(`^(?:${pattern})$`, 'i'),
                     ips
                 });
             } catch (err) {
