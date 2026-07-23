@@ -21,8 +21,8 @@ const PTR_HOSTNAME = process.env.PTR_HOSTNAME ?? 'localhost123.com';
 const SERVER_IP = process.env.SERVER_IP ?? '127.0.0.1';
 const SERVER_PORT = Number(process.env.SERVER_PORT ?? 53);
 
-const DNS_PORT = Number(process.env.DNS_PORT) ?? 53;
-const DNS_TTL = Number(process.env.DNS_TTL) ?? 60;
+const DNS_PORT = Number(process.env.DNS_PORT ?? 53);
+const DNS_TTL = Number(process.env.DNS_TTL ?? 60);
 
 const SERVER_REVERSE_IP = SERVER_IP.split('.').reverse().join('.');
 
