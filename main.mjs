@@ -237,7 +237,7 @@ function appendDebugRecords(packet, request, info) {
 
     for (const record of records) {
         packet.additionals.push({
-            name: `${DEBUG_PREFIX}${request.questions[0].name}`,
+            name: request.questions[0].name,
             type: Packet.TYPE.TXT,
             class: Packet.CLASS.IN,
             ttl: DNS_TTL,
