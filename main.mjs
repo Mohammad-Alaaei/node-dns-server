@@ -20,6 +20,13 @@ const CACHE_LEVELS = {
     'NONE': 'NONE',
 }
 
+const DNS_TYPES = {
+    ...Object.fromEntries(
+        Object.entries(Packet.TYPE).map(([name, value]) => [value, name])
+    ),
+    65: 'HTTPS'
+};
+
 const DEFAULT_DNS = process.env.DEFAULT_DNS ?? '4.2.2.4';
 const DOMAIN_FILE = process.env.DOMAIN_FILE ?? 'domains.txt';
 const TXT_FILES_DIR = process.env.TXT_FILES_DIR ?? './';
@@ -706,7 +713,7 @@ async function handleRequest(message, remote) {
             domain = domain.substring(2);
         }
 
-        logger.info(`domainName: ${domain}`);
+        logger.info(`Requested for: ${domain} (${DNS_TYPES[question.type] ?? 'N/A'})`);
 
         let response;
 
