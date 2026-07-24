@@ -816,7 +816,7 @@ async function main() {
     if (CACHE_LEVEL != CACHE_LEVELS.NONE) {
         await cacher.init(CACHE_LEVEL === CACHE_LEVELS.CUSTOM_ONLY
             ? CACHE_LEVELS.ALL
-            : CACHE_LEVELS.FILTERED_ONLY
+            : CACHE_LEVEL
         );
     }
 
