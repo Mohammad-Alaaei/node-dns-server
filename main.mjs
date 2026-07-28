@@ -731,7 +731,7 @@ async function handleRequest(message, remote) {
                 break;
 
             default:
-                response = await handleOtherRequest(request, message, domain, Packet.TYPE[question.type]);
+                response = await handleOtherRequest(request, message, domain, DNS_TYPES[question.type] ?? String(question.type));
                 break;
         }
 
