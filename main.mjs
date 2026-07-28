@@ -713,7 +713,7 @@ async function handleRequest(message, remote) {
             domain = domain.substring(2);
         }
 
-        logger.info(`Requested for: ${domain} (${DNS_TYPES[question.type] ?? 'N/A'})`);
+        logger.info(`Requested for: ${domain} (${DNS_TYPES[question.type] ?? question.type})`);
 
         let response;
 
