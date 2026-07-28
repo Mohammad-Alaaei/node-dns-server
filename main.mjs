@@ -165,6 +165,8 @@ async function loadCustomDnsServers() {
                 domains
             });
         }
+
+        logger.info(`Loaded ${servers.length} custom DNS server${servers.length > 1 ? 's' : ''}`);
     } catch (err) {
         logger.error('Error reading custom DNS files:', err);
     }
