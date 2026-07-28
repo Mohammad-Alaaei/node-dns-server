@@ -155,7 +155,7 @@ async function loadCustomDnsServers() {
 
                 domains.push({
                     pattern: trimmed,
-                    regex: new RegExp(trimmed, 'i')
+                    regex: new RegExp(`^(?:${trimmed})$`, 'i')
                 });
             }
 
