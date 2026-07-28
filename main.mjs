@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 import dgram from 'node:dgram';
-import { promises as fs } from 'node:fs';
+import { promises as fs, watch } from 'node:fs';
 import path from 'node:path';
 
 import { Packet } from 'dns2';
@@ -51,6 +51,7 @@ const SERVER_REVERSE_IP = SERVER_IP.split('.').reverse().join('.');
 
 let localDomains = [];
 let customDnsServers = [];
+let reloadTimer = null;
 let server;
 
 /* -------------------------------------------------------------------------- */
@@ -172,6 +173,37 @@ async function loadCustomDnsServers() {
     }
 
     return servers;
+}
+
+
+async function reloadConfiguration() {
+    try {
+        logger.info('Reloading configuration...');
+
+        const [domains, servers] = await Promise.all([
+            loadLocalDomains(),
+            loadCustomDnsServers()
+        ]);
+
+        localDomains = domains;
+        customDnsServers = servers;
+
+        logger.info('Configuration reloaded.');
+        console.log('=============');
+    }
+    catch (err) {
+        logger.error(err);
+    }
+}
+
+function watchConfiguration() {
+    watch(TXT_FILES_DIR, { recursive: false }, () => {
+        clearTimeout(reloadTimer);
+
+        reloadTimer = setTimeout(() => {
+            reloadConfiguration();
+        }, 500);
+    });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -834,6 +866,8 @@ async function main() {
     customDnsServers = await loadCustomDnsServers();
 
     await startServer();
+
+    watchConfiguration();
 }
 
 main().catch(err => {
