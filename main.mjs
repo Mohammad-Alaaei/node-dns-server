@@ -820,7 +820,7 @@ process.once('unhandledRejection', async err => {
 async function main() {
     await logger.init();
 
-    if (CACHE_LEVEL != CACHE_LEVELS.NONE) {
+    if (CACHE_LEVEL !== CACHE_LEVELS.NONE) {
         await cacher.init(CACHE_LEVEL === CACHE_LEVELS.CUSTOM_ONLY
             ? CACHE_LEVELS.ALL
             : CACHE_LEVEL
