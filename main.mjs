@@ -37,6 +37,7 @@ const SERVER_PORT = Number(process.env.SERVER_PORT ?? 53);
 
 const DNS_PORT = Number(process.env.DNS_PORT ?? 53);
 const DNS_TTL = Number(process.env.DNS_TTL ?? 60);
+const DNS_TIMEOUT = Number(process.env.DNS_TIMEOUT ?? 8000);
 
 const CACHE_LEVEL = process.env.CACHE_LEVEL ?? CACHE_LEVELS.CUSTOM_ONLY;
 
@@ -364,7 +365,7 @@ function forwardToExternalDns(message, dnsServer, cacheResult = false) {
         const timeout = setTimeout(() => {
             client.close();
             reject(`DNS query timed out (${dnsServer})`);
-        }, 8000);
+        }, DNS_TIMEOUT);
 
         client.once('error', err => {
             clearTimeout(timeout);
