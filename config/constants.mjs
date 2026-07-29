@@ -1,0 +1,15 @@
+import { Packet } from "dns2";
+
+export const CACHE_LEVELS = {
+    ALL: 'ALL',
+    CUSTOM_ONLY: 'CUSTOM_ONLY',
+    FILTERED_ONLY: 'FILTERED_ONLY',
+    NONE: 'NONE'
+};
+
+export const DNS_TYPES = {
+    ...Object.fromEntries(
+        Object.entries(Packet.TYPE).map(([name, value]) => [value, name])
+    ),
+    65: 'HTTPS'
+};
