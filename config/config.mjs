@@ -17,6 +17,7 @@ export const config = {
 
     cache: {
         level: process.env.CACHE_LEVEL ?? CACHE_LEVELS.CUSTOM_ONLY,
+        expireTime: process.env.CACHE_EXPIRE_TIME ?? 60,
         flushInterval: Number(process.env.FLUSH_INTERVAL_MS ?? 60000),
         filterIps: (process.env.FILTER_IPS ?? '')
             .split(/\s+/)
