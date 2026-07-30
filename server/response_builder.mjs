@@ -56,7 +56,7 @@ function createRecordResponse(request, record, requestedType) {
             domain: cname.domain
         });
 
-        const target = findRecord(cname.domain);
+        const target = findRecord(cname.domain, 'CNAME');
 
         if (!target) {
             continue;
