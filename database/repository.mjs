@@ -27,6 +27,7 @@ export async function loadRecords() {
     const rows = await all(`
         SELECT *
         FROM records
+        WHERE enabled = 1
         ORDER BY
             is_regex ASC,
             LENGTH(domain) DESC,
@@ -212,6 +213,14 @@ export async function insertRecord(record, reload = true) {
     const now = Date.now();
 
     await transaction(async () => {
+        if (record.source === 'LOCAL') {
+            await run(`
+                UPDATE records
+                SET enabled = 0
+                WHERE domain = ?
+                AND source IN ('CACHE', 'FILTERED')
+            `, [record.domain]);
+        }
 
         await insertValues(record, 'A', record.A ?? [], now);
         await insertValues(record, 'AAAA', record.AAAA ?? [], now);
@@ -269,20 +278,21 @@ async function insertValues(record, type, values, now) {
         }
 
         await run(`
-                INSERT INTO records(
-                    domain,
-                    is_regex,
-                    type,
-                    value,
-                    source,
-                    ttl,
-                    expires_at,
-                    hits,
-                    last_hit,
-                    created_at,
-                    updated_at
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO records(
+                domain,
+                is_regex,
+                type,
+                value,
+                source,
+                enabled,
+                ttl,
+                expires_at,
+                hits,
+                last_hit,
+                created_at,
+                updated_at
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             `, [
             record.domain,
             record.isRegex ? 1 : 0,
@@ -300,13 +310,28 @@ async function insertValues(record, type, values, now) {
 }
 
 export async function upsertCacheRecord(record, reload = true) {
+
     await transaction(async () => {
-        const result = await run(
-            'DELETE FROM records WHERE domain = ? AND source IN ("CACHE","FILTERED")',
-            [record.domain]
-        );
+
+        const local = await get(`
+            SELECT 1
+            FROM records
+            WHERE domain = ?
+              AND source = 'LOCAL'
+              AND enabled = 1
+            LIMIT 1
+        `, [record.domain]);
+
+        record.enabled = local ? 0 : 1;
+
+        await run(`
+            DELETE FROM records
+            WHERE domain = ?
+              AND source IN ('CACHE', 'FILTERED')
+        `, [record.domain]);
 
         await insertRecord(record, false);
+
     });
 
     if (reload) {
@@ -324,6 +349,52 @@ export async function deleteExpiredCacheRecords() {
           AND expires_at IS NOT NULL
           AND expires_at <= ?
     `, [now]);
+
+    await loadRecords();
+}
+
+export async function enableLocalRecord(domain) {
+
+    await transaction(async () => {
+
+        await run(`
+            UPDATE records
+            SET enabled = 0
+            WHERE domain = ?
+              AND source IN ('CACHE', 'FILTERED')
+        `, [domain]);
+
+        await run(`
+            UPDATE records
+            SET enabled = 1
+            WHERE domain = ?
+              AND source = 'LOCAL'
+        `, [domain]);
+
+    });
+
+    await loadRecords();
+}
+
+export async function disableLocalRecord(domain) {
+
+    await transaction(async () => {
+
+        await run(`
+            UPDATE records
+            SET enabled = 0
+            WHERE domain = ?
+              AND source = 'LOCAL'
+        `, [domain]);
+
+        await run(`
+            UPDATE records
+            SET enabled = 1
+            WHERE domain = ?
+              AND source IN ('CACHE', 'FILTERED')
+        `, [domain]);
+
+    });
 
     await loadRecords();
 }

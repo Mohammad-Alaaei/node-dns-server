@@ -35,14 +35,15 @@ export async function createSchema() {
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             domain TEXT NOT NULL,
-            is_regex INTEGER NOT NULL DEFAULT 0,
             type TEXT NOT NULL,
             value TEXT NOT NULL,
             source TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
             ttl INTEGER NOT NULL,
-            expires_at INTEGER,
             hits INTEGER NOT NULL DEFAULT 0,
             last_hit INTEGER,
+            is_regex INTEGER NOT NULL DEFAULT 0,
+            expires_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
