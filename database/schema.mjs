@@ -34,19 +34,49 @@ export async function createSchema() {
 
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            domain TEXT NOT NULL,
-            type TEXT NOT NULL,
-            value TEXT NOT NULL,
-            source TEXT NOT NULL,
+
+            domain TEXT NOT NULL UNIQUE,
             enabled INTEGER NOT NULL DEFAULT 1,
-            ttl INTEGER NOT NULL,
+            is_regex INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL,
             hits INTEGER NOT NULL DEFAULT 0,
             last_hit INTEGER,
-            is_regex INTEGER NOT NULL DEFAULT 0,
-            expires_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS record_values (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            record_id INTEGER NOT NULL,
+            dns_server_id INTEGER,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            value TEXT,
+            ttl INTEGER,
+            expires_at INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+
+            FOREIGN KEY(record_id)
+                REFERENCES records(id)
+                ON DELETE CASCADE,
+
+            FOREIGN KEY(dns_server_id)
+                REFERENCES dns_servers(id)
+                ON DELETE CASCADE,
+
+            UNIQUE(record_id, dns_server_id, type)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_record_values_record
+            ON record_values(record_id);
+
+        CREATE INDEX IF NOT EXISTS idx_record_values_server
+            ON record_values(dns_server_id);
+
+        CREATE INDEX IF NOT EXISTS idx_record_values_lookup
+            ON record_values(record_id, dns_server_id, type);
 
         CREATE INDEX IF NOT EXISTS idx_records_domain
             ON records(domain);
