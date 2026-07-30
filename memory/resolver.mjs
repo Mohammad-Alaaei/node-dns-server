@@ -30,19 +30,19 @@ function isExpired(record) {
 
 function isRecordValid(record, type) {
 
+    if (!record) {
+        console.warn('--------------NULL RECORD!')
+        return false;
+    }
+
     if (isExpired(record)) {
         return false;
     }
 
-    if (type === 'CNAME') {
-        return record.CNAME.length > 0;
-    }
-
-    if (record[type].length) {
-        return true;
-    }
-
-    return record.CNAME.length > 0;
+    return (
+        record?.CNAME?.length > 0 ||
+        record[type]?.length > 0
+    );
 }
 
 export function findCustomDnsServer(domain) {
