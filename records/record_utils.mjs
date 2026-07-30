@@ -24,7 +24,6 @@ export async function handleLocalRecord({
     const record = findRecord(domain, type);
 
     if (!record) {
-
         return handleExternalRequests(
             request,
             message,
@@ -52,7 +51,6 @@ export async function handleLocalRecord({
     );
 
     if (debug) {
-
         appendDebugRecords(packet, request, {
             resolver: 'Local',
             server: SERVER_IP,

@@ -2,6 +2,27 @@ import { Packet } from 'dns2';
 import * as logger from '../utils/logger.mjs';
 import { cacheRecord } from './cache_service.mjs';
 
+
+function getRecord(records, domain) {
+
+    let record = records.get(domain);
+
+    if (!record) {
+
+        record = {
+            domain,
+            A: [],
+            AAAA: [],
+            CNAME: [],
+            ttl: 300
+        };
+
+        records.set(domain, record);
+    }
+
+    return record;
+}
+
 /**
  * Logs resolved resource records from an external DNS response.
  *
@@ -14,37 +35,13 @@ function handleUpstreamResponse(packet, cacheResult = false) {
 
     const records = new Map();
 
-    function getRecord(domain) {
-
-        let record = records.get(domain);
-
-        if (!record) {
-
-            record = {
-                domain,
-                A: [],
-                AAAA: [],
-                CNAME: [],
-                ttl: 300
-            };
-
-            records.set(domain, record);
-        }
-
-        return record;
-    }
-
     for (const answer of packet.answers) {
 
         switch (answer.type) {
-
             case Packet.TYPE.CNAME: {
+                logger.info(`Resolved CNAME: ${answer.name} → ${answer.domain}`);
 
-                logger.info(
-                    `Resolved CNAME: ${answer.name} → ${answer.domain}`
-                );
-
-                const record = getRecord(answer.name);
+                const record = getRecord(records, answer.name);
 
                 record.CNAME.push({
                     name: answer.name,
@@ -59,12 +56,9 @@ function handleUpstreamResponse(packet, cacheResult = false) {
             }
 
             case Packet.TYPE.A: {
+                logger.info(`Resolved A: ${answer.name} → ${answer.address}`);
 
-                logger.info(
-                    `Resolved A: ${answer.name} → ${answer.address}`
-                );
-
-                const record = getRecord(answer.name);
+                const record = getRecord(records, answer.name);
 
                 record.A.push({
                     name: answer.name,
@@ -79,12 +73,9 @@ function handleUpstreamResponse(packet, cacheResult = false) {
             }
 
             case Packet.TYPE.AAAA: {
+                logger.info(`Resolved AAAA: ${answer.name} → ${answer.address}`);
 
-                logger.info(
-                    `Resolved AAAA: ${answer.name} → ${answer.address}`
-                );
-
-                const record = getRecord(answer.name);
+                const record = getRecord(records, answer.name);
 
                 record.AAAA.push({
                     name: answer.name,
