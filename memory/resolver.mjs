@@ -21,10 +21,16 @@ export function findRecord(domain, type) {
     return null;
 }
 
-function isExpired(record) {
-    return (
-        record.expiresAt &&
-        record.expiresAt <= Date.now()
+function isExpired(values) {
+    if (!values.length) {
+        return true;
+    }
+
+    const now = Date.now();
+
+    return values.every(v =>
+        v.expiresAt !== null &&
+        v.expiresAt <= now
     );
 }
 
@@ -35,7 +41,11 @@ function isRecordValid(record, type) {
         return false;
     }
 
-    if (isExpired(record)) {
+    if (
+        isExpired(record.A) &&
+        isExpired(record.AAAA) &&
+        isExpired(record.CNAME)
+    ) {
         return false;
     }
 

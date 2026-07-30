@@ -1,7 +1,9 @@
 import { Packet } from 'dns2';
 import * as logger from '../utils/logger.mjs';
 import { cacheRecord } from './cache_service.mjs';
+import { config } from '../config/config.mjs';
 
+const CACHE_EXPIRE_TIME = config.cache.expireTime;
 
 function getRecord(records, domain) {
 
@@ -14,7 +16,6 @@ function getRecord(records, domain) {
             A: [],
             AAAA: [],
             CNAME: [],
-            ttl: 300
         };
 
         records.set(domain, record);
@@ -45,12 +46,11 @@ function handleUpstreamResponse(packet, cacheResult = false) {
 
                 record.CNAME.push({
                     name: answer.name,
-                    domain: answer.domain
+                    domain: answer.domain,
+                    ttl: answer.ttl,
+                    expiresAt: Date.now() + CACHE_EXPIRE_TIME * 1000
                 });
 
-                if (answer.ttl) {
-                    record.ttl = Math.min(record.ttl, answer.ttl);
-                }
 
                 break;
             }
@@ -62,12 +62,10 @@ function handleUpstreamResponse(packet, cacheResult = false) {
 
                 record.A.push({
                     name: answer.name,
-                    address: answer.address
+                    address: answer.address,
+                    ttl: answer.ttl,
+                    expiresAt: Date.now() + CACHE_EXPIRE_TIME * 1000
                 });
-
-                if (answer.ttl) {
-                    record.ttl = Math.min(record.ttl, answer.ttl);
-                }
 
                 break;
             }
@@ -79,12 +77,10 @@ function handleUpstreamResponse(packet, cacheResult = false) {
 
                 record.AAAA.push({
                     name: answer.name,
-                    address: answer.address
+                    address: answer.address,
+                    ttl: answer.ttl,
+                    expiresAt: Date.now() + CACHE_EXPIRE_TIME * 1000
                 });
-
-                if (answer.ttl) {
-                    record.ttl = Math.min(record.ttl, answer.ttl);
-                }
 
                 break;
             }
@@ -100,15 +96,8 @@ function handleUpstreamResponse(packet, cacheResult = false) {
     }
 
     if (cacheResult) {
-
         for (const record of records.values()) {
-            cacheRecord(
-                record.domain,
-                record.A,
-                record.AAAA,
-                record.CNAME,
-                record.ttl
-            );
+            cacheRecord(record);
         }
     }
 

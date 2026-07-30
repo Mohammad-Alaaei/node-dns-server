@@ -46,34 +46,41 @@ function createRecordResponse(request, record, requestedType) {
 
     const response = Packet.createResponseFromRequest(request);
 
-    for (const cname of record.CNAME) {
+    let current = record;
+    const visited = new Set();
 
+    while (current && !visited.has(current.domain)) {
+        visited.add(current.domain);
+
+        for (const cname of current.CNAME) {
         response.answers.push({
-            name: cname.name,
+                name: current.domain,
             type: Packet.TYPE.CNAME,
             class: Packet.CLASS.IN,
-            ttl: record.ttl,
+                ttl: cname.ttl ?? 60,
             domain: cname.domain
         });
-
-        const target = findRecord(cname.domain, 'CNAME');
-
-        if (!target) {
-            continue;
         }
 
-        appendAddressRecords(
-            response,
-            target,
-            requestedType
-        );
+        if (current[requestedType].length) {
+            for (const value of current[requestedType]) {
+                response.answers.push({
+                    name: value.name,
+                    type: Packet.TYPE[requestedType],
+                    class: Packet.CLASS.IN,
+                    ttl: value.ttl ?? 60,
+                    address: value.address
+                });
+            }
+            break;
     }
 
-    if (!record.CNAME.length) {
+        if (!current.CNAME.length) {
+            break;
+        }
 
-        appendAddressRecords(
-            response,
-            record,
+        current = findRecord(
+            current.CNAME[0].domain,
             requestedType
         );
     }

@@ -1,10 +1,9 @@
 import * as logger from '../utils/logger.mjs';
 import { config } from '../config/config.mjs';
 
-import {
-    upsertCacheRecord
-} from '../database/repository.mjs';
+import { saveRecord } from '../database/repository.mjs';
 import { mergeRecords } from '../utils/array_utils.mjs';
+import { putRecord } from '../memory/cache_memory.mjs';
 
 const FLUSH_INTERVAL_MS = config.cache.flushInterval;
 const FILTER_IPS = new Set(config.cache.filterIps);
@@ -39,7 +38,7 @@ async function flushCache() {
         try {
             for (const record of records) {
                 try {
-                    await upsertCacheRecord(record);
+                    await saveRecord(record);
                 } catch (err) {
                     console.error(err);
                 }
@@ -64,58 +63,48 @@ async function flushCache() {
 /*                                  Public                                    */
 /* -------------------------------------------------------------------------- */
 
-export function cacheRecord(
-    domain,
-    A = [],
-    AAAA = [],
-    CNAME = [],
-    ttl = 300
-) {
+export function cacheRecord(record) {
+
+    const now = Date.now();
 
     const source =
-        [...A, ...AAAA].some(r => FILTER_IPS.has(r.address))
+        [...record.A, ...record.AAAA]
+            .some(r => FILTER_IPS.has(r.address))
             ? 'FILTERED'
             : 'CACHE';
 
-    const now = Date.now();
-    const existing = pendingCache.get(domain);
+    record.source = source;
+
+    const existing = pendingCache.get(record.domain);
 
     if (existing) {
 
-        mergeRecords(existing.A, A, 'address');
-        mergeRecords(existing.AAAA, AAAA, 'address');
-        mergeRecords(existing.CNAME, CNAME, 'domain');
+        mergeRecords(existing.A, record.A, 'address');
+        mergeRecords(existing.AAAA, record.AAAA, 'address');
+        mergeRecords(existing.CNAME, record.CNAME, 'domain');
 
-        existing.ttl = Math.min(existing.ttl, ttl);
-        existing.hits = existing.hits + 1;
+        existing.hits++;
         existing.lastHit = now;
-        existing.expiresAt = now + existing.ttl * 1000;
 
         if (source === 'FILTERED') {
             existing.source = 'FILTERED';
         }
 
+        putRecord(existing);
+
         return;
     }
 
-    pendingCache.set(domain, {
+    record.isRegex = false;
+    record.hits = 1;
+    record.lastHit = now;
 
-        domain,
-        isRegex: false,
+    pendingCache.set(
+        record.domain,
+        record
+    );
 
-        // Keep the original dns2 answer objects.
-        A: [...A],
-        AAAA: [...AAAA],
-        CNAME: [...CNAME],
-
-        source,
-
-        ttl,
-        expiresAt: now + ttl * 1000,
-
-        hits: 1,
-        lastHit: now
-    });
+    putRecord(record);
 }
 
 export async function flush() {
