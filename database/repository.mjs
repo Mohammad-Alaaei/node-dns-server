@@ -299,6 +299,7 @@ async function insertValues(record, type, values, now) {
             type,
             recordValue,
             record.source,
+            record.enabled ?? 1,
             record.ttl,
             record.expiresAt,
             record.hits ?? 0,
