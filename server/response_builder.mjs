@@ -23,12 +23,27 @@ function appendDebugRecords(packet, request, info) {
         packet.additionals = [];
     }
 
+    const answers = info.answers.map(answer => {
+
+        if (typeof answer === 'string') {
+            return answer;
+        }
+
+        return (
+            answer.address ??
+            answer.domain ??
+            answer.exchange ??
+            answer.data ??
+            String(answer)
+        );
+    });
+
     const records = [
         `Resolver=${info.resolver}`,
         `Server=${info.server}`,
         `Type=${info.type}`,
-        `Count=${info.answers.length}`,
-        ...info.answers.map(value => `Answer=${value}`)
+        `Count=${answers.length}`,
+        ...answers.map(value => `Answer=${value}`)
     ];
 
     for (const record of records) {
@@ -53,13 +68,13 @@ function createRecordResponse(request, record, requestedType) {
         visited.add(current.domain);
 
         for (const cname of current.CNAME) {
-        response.answers.push({
+            response.answers.push({
                 name: current.domain,
-            type: Packet.TYPE.CNAME,
-            class: Packet.CLASS.IN,
+                type: Packet.TYPE.CNAME,
+                class: Packet.CLASS.IN,
                 ttl: cname.ttl ?? 60,
-            domain: cname.domain
-        });
+                domain: cname.domain
+            });
         }
 
         if (current[requestedType].length) {
@@ -73,7 +88,7 @@ function createRecordResponse(request, record, requestedType) {
                 });
             }
             break;
-    }
+        }
 
         if (!current.CNAME.length) {
             break;

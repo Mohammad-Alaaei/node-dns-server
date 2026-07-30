@@ -51,11 +51,30 @@ export async function handleLocalRecord({
     );
 
     if (debug) {
+        const debugAnswers = packet.answers.map(answer => {
+            switch (answer.type) {
+                case Packet.TYPE.A:
+                case Packet.TYPE.AAAA:
+                    return answer.address;
+
+                case Packet.TYPE.CNAME:
+                case Packet.TYPE.PTR:
+                    return answer.domain;
+
+                case Packet.TYPE.MX:
+                    return answer.exchange;
+
+                default:
+                    return null;
+            }
+
+        }).filter(Boolean);
+
         appendDebugRecords(packet, request, {
             resolver: 'Local',
             server: SERVER_IP,
             type,
-            answers: record[type]
+            answers: debugAnswers
         });
     }
 
