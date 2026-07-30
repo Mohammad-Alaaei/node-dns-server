@@ -13,3 +13,12 @@ export const DNS_TYPES = {
     ),
     65: 'HTTPS'
 };
+
+export const RECORD_STATUS = {
+    SUCCESS: 'SUCCESS',
+    FILTERED: 'FILTERED',
+    TIMEOUT: 'TIMEOUT',
+    NXDOMAIN: 'NXDOMAIN',
+    SERVFAIL: 'SERVFAIL',
+    REFUSED: 'REFUSED'
+};

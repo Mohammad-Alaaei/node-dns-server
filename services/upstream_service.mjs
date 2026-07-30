@@ -31,7 +31,7 @@ export async function handleExternalRequests(
 
     const response = await forwardToExternalDns(
         upstreamMessage,
-        upstream.server.ip
+        upstream.server
     );
 
     await handleUpstreamResponse(
