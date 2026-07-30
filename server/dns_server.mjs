@@ -7,6 +7,7 @@ import { handleRequest } from './request_router.mjs';
 
 let server = null;
 const activeRequests = new Set();
+let shuttingDown = false;
 
 /**
  * Creates and starts the DNS server.
@@ -17,6 +18,11 @@ async function startServer(ip, port) {
     server = dgram.createSocket('udp4');
 
     server.on('message', (message, remote) => {
+
+        if (shuttingDown) {
+            return;
+        }
+
         const promise = handleRequest(message, remote)
             .catch(logger.error)
             .finally(() => activeRequests.delete(promise));
@@ -44,34 +50,55 @@ async function startServer(ip, port) {
  * }} response
  */
 function sendResponse(remote, response) {
-    if (response.packet) {
+
+    if (shuttingDown || !server) {
+        return;
+    }
+
+    try {
+        if (response.packet) {
+            server.send(
+                response.packet.toBuffer(),
+                remote.port,
+                remote.address
+            );
+
+            return;
+        }
+
         server.send(
-            response.packet.toBuffer(),
+            response.buffer,
             remote.port,
             remote.address
         );
 
-        return;
+    } catch (err) {
+        if (err.code !== 'ERR_SOCKET_DGRAM_NOT_RUNNING') {
+            throw err;
+        }
     }
-
-    server.send(
-        response.buffer,
-        remote.port,
-        remote.address
-    );
 }
 
 
 async function shutdown(signal) {
+
+    if (shuttingDown) {
+        return;
+    }
+
+    shuttingDown = true;
+
     logger.info(`${signal} received. Shutting down...`);
 
     try {
-        await new Promise(resolve => server.close(resolve));
 
         await Promise.allSettled(activeRequests);
 
-        await logger.shutdown();
         await cacheService.shutdown();
+
+        await new Promise(resolve => server.close(resolve));
+        
+        await logger.shutdown();
 
     } catch (err) {
         console.error('Error during shutdown.', err);
