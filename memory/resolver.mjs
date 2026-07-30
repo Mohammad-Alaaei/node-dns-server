@@ -1,42 +1,48 @@
 import { store } from './store.mjs';
 
-export function findRecord(domain, type = null) {
+export function findRecord(domain, type) {
 
     const exact = store.exactRecords.get(domain);
 
-    if (exact) {
-
-        if (
-            !type ||
-            exact[type].length ||
-            (
-                (type === 'A' || type === 'AAAA') &&
-                exact.CNAME.length
-            )
-        ) {
-            return exact;
-        }
+    if (exact && isRecordValid(exact, type)) {
+        return exact;
     }
 
     for (const record of store.regexRecords) {
 
-        if (!record.regex.test(domain)) {
-            continue;
-        }
-
         if (
-            !type ||
-            record[type].length ||
-            (
-                (type === 'A' || type === 'AAAA') &&
-                record.CNAME.length
-            )
+            record.regex.test(domain) &&
+            isRecordValid(record, type)
         ) {
             return record;
         }
     }
 
     return null;
+}
+
+function isExpired(record) {
+    return (
+        record.expiresAt &&
+        record.expiresAt <= Date.now()
+    );
+}
+
+function isRecordValid(record, type) {
+
+    if (isExpired(record)) {
+        return false;
+    }
+
+    if (type === 'CNAME') {
+        return record.CNAME.length > 0;
+    }
+
+    if (record[type].length) {
+        return true;
+    }
+
+    return record.CNAME.length > 0;
 }
 
 export function findCustomDnsServer(domain) {

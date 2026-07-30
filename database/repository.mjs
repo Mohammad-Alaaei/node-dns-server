@@ -196,7 +196,9 @@ function createRecord(row) {
 
         source: row.source,
         ttl: row.ttl,
-        expiresAt: row.expires_at,
+        expiresAt: row.source === 'CACHE' || row.source === 'FILTERED'
+            ? row.expires_at
+            : null,
 
         hits: row.hits,
         lastHit: row.last_hit,
