@@ -77,6 +77,7 @@ export function cacheRecord(
             ? 'FILTERED'
             : 'CACHE';
 
+    const now = Date.now();
     const existing = pendingCache.get(domain);
 
     if (existing) {
@@ -86,7 +87,13 @@ export function cacheRecord(
         mergeRecords(existing.CNAME, CNAME, 'domain');
 
         existing.ttl = Math.min(existing.ttl, ttl);
-        existing.expiresAt = Date.now() + existing.ttl * 1000;
+        existing.hits = existing.hits + 1;
+        existing.lastHit = now;
+        existing.expiresAt = now + existing.ttl * 1000;
+
+        if (source === 'FILTERED') {
+            existing.source = 'FILTERED';
+        }
 
         return;
     }
@@ -104,10 +111,10 @@ export function cacheRecord(
         source,
 
         ttl,
-        expiresAt: Date.now() + ttl * 1000,
+        expiresAt: now + ttl * 1000,
 
-        hits: 0,
-        lastHit: null
+        hits: 1,
+        lastHit: now
     });
 }
 
