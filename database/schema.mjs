@@ -35,7 +35,7 @@ export async function createSchema() {
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-            domain TEXT NOT NULL UNIQUE,
+            domain TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
             is_regex INTEGER NOT NULL DEFAULT 0,
             source TEXT NOT NULL,
@@ -77,6 +77,9 @@ export async function createSchema() {
 
         CREATE INDEX IF NOT EXISTS idx_record_values_lookup
             ON record_values(record_id, dns_server_id, type);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_records_domain_source
+            ON records(domain, source);
 
         CREATE INDEX IF NOT EXISTS idx_records_domain
             ON records(domain);
