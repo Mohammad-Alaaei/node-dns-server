@@ -40,7 +40,7 @@ async function flushCache() {
                 try {
                     await saveRecord(record);
                 } catch (err) {
-                    console.error(err);
+                    logger.error(err);
                 }
 
             }
