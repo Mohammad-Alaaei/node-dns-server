@@ -48,12 +48,18 @@ export async function loadRecords() {
             rv.selected,
             rv.value,
             rv.ttl,
-            rv.expires_at
+            rv.expires_at,
+            rv.selected,
+            rv.last_success_at,
+            ds.average_latency
 
         FROM records r
 
         LEFT JOIN record_values rv
             ON rv.record_id = r.id
+
+        LEFT JOIN dns_servers ds
+            ON ds.id = rv.dns_server_id
 
         WHERE
             r.enabled = 1
@@ -65,7 +71,11 @@ export async function loadRecords() {
         ORDER BY
             r.is_regex ASC,
             LENGTH(r.domain) DESC,
-            r.domain ASC
+            r.domain ASC,
+
+            rv.selected DESC,
+            ds.average_latency ASC,
+            rv.last_success_at DESC
     `);
 
     for (const row of rows) {
@@ -278,45 +288,8 @@ async function upsertRecordValue(
 
     const now = Date.now();
 
-    let ttl = null;
-    let expiresAt = null;
-
-    if (status === RECORD_STATUS.SUCCESS && values.length) {
-
-        ttl = Math.min(
-            ...values.map(v => v.ttl ?? 300)
-        );
-
-        expiresAt = Math.min(
-            ...values.map(v => v.expiresAt ?? (now + ttl * 1000))
-        );
-    }
-
-    let value = null;
-
-    switch (type) {
-
-        case 'A':
-        case 'AAAA':
-            value = JSON.stringify(
-                values.map(v => v.address)
-            );
-
-            break;
-
-        case 'CNAME':
-            value = JSON.stringify(
-                values.map(v => v.domain)
-            );
-
-            break;
-
-        default:
-            value = JSON.stringify(values);
-    }
-
     const existing = await get(`
-        SELECT id
+        SELECT *
         FROM record_values
         WHERE
             record_id = ?
@@ -328,6 +301,74 @@ async function upsertRecordValue(
         type
     ]);
 
+    let ttl = existing?.ttl ?? null;
+    let expiresAt = existing?.expires_at ?? null;
+    let value = existing?.value ?? null;
+    let lastSuccessAt = existing?.last_success_at ?? null;
+    let isStale = existing?.is_stale ?? 0;
+    let selectedValue = existing?.selected ?? 0;
+
+    if (
+        status === RECORD_STATUS.SUCCESS &&
+        values.length
+    ) {
+
+        ttl = Math.min(
+            ...values.map(v => v.ttl ?? 300)
+        );
+
+        expiresAt = Math.min(
+            ...values.map(
+                v => v.expiresAt ?? (now + ttl * 1000)
+            )
+        );
+
+        switch (type) {
+
+            case 'A':
+            case 'AAAA':
+                value = JSON.stringify(
+                    values.map(v => v.address)
+                );
+                break;
+
+            case 'CNAME':
+                value = JSON.stringify(
+                    values.map(v => v.domain)
+                );
+                break;
+
+            default:
+                value = JSON.stringify(values);
+        }
+
+        lastSuccessAt = now;
+        isStale = 0;
+        selectedValue = selected ? 1 : 0;
+    }
+    else {
+        const hasSuccessfulValue = existing?.last_success_at != null;
+        // Never overwrite a previously successful value.
+        if (
+            existing && hasSuccessfulValue
+        ) {
+            value = existing.value;
+            ttl = existing.ttl;
+            expiresAt = existing.expires_at;
+
+            selectedValue = existing.selected;
+            isStale = 1;
+        }
+        else {
+            value = null;
+            ttl = null;
+            expiresAt = null;
+
+            selectedValue = 0;
+            isStale = 1;
+        }
+    }
+
     if (existing) {
 
         await run(`
@@ -335,18 +376,22 @@ async function upsertRecordValue(
             SET
                 status = ?,
                 selected = ?,
+                is_stale = ?,
                 value = ?,
                 ttl = ?,
                 expires_at = ?,
-                updated_at = ?
+                updated_at = ?,
+                last_success_at = ?
             WHERE id = ?
         `, [
             status,
-            selected ? 1 : 0,
+            selectedValue,
+            isStale,
             value,
             ttl,
             expiresAt,
             now,
+            lastSuccessAt,
             existing.id
         ]);
 
@@ -362,16 +407,18 @@ async function upsertRecordValue(
             type,
             status,
             selected,
+            is_stale,
 
             value,
             ttl,
             expires_at,
 
             created_at,
-            updated_at
+            updated_at,
+            last_success_at
 
         )
-        VALUES(?,?,?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
     `, [
 
         recordId,
@@ -379,14 +426,29 @@ async function upsertRecordValue(
 
         type,
         status,
-        selected ? 1 : 0,
+        selectedValue,
+        isStale,
 
         value,
         ttl,
         expiresAt,
 
         now,
-        now
+        now,
+        lastSuccessAt
+    ]);
+}
+
+async function clearSelected(recordId, type) {
+    await run(`
+        UPDATE record_values
+        SET selected = 0
+        WHERE
+            record_id = ?
+            AND type = ?
+    `, [
+        recordId,
+        type
     ]);
 }
 
@@ -399,14 +461,17 @@ export async function saveRecord(record) {
     const recordId = await ensureRecord(record);
 
     if (record.A.length) {
+        await clearSelected(recordId, 'A');
         await upsertRecordValue(recordId, record.dnsServerId, 'A', status, record.A, true);
     }
 
     if (record.AAAA.length) {
+        await clearSelected(recordId, 'AAAA');
         await upsertRecordValue(recordId, record.dnsServerId, 'AAAA', status, record.AAAA, true);
     }
 
     if (record.CNAME.length) {
+        await clearSelected(recordId, 'CNAME');
         await upsertRecordValue(recordId, record.dnsServerId, 'CNAME', status, record.CNAME, true);
     }
 }
