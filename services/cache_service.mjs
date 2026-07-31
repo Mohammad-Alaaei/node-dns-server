@@ -63,7 +63,7 @@ async function flushCache() {
 /*                                  Public                                    */
 /* -------------------------------------------------------------------------- */
 
-export function cacheRecord(record) {
+export function cacheRecord(record, dnsServerId = null) {
 
     const now = Date.now();
 
@@ -74,6 +74,7 @@ export function cacheRecord(record) {
             : 'CACHE';
 
     record.source = source;
+    record.dnsServerId = dnsServerId;
 
     const existing = pendingCache.get(record.domain);
 
@@ -85,6 +86,7 @@ export function cacheRecord(record) {
 
         existing.hits++;
         existing.lastHit = now;
+        existing.dnsServerId = dnsServerId;
 
         if (source === 'FILTERED') {
             existing.source = 'FILTERED';

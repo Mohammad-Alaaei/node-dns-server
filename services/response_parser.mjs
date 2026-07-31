@@ -28,7 +28,11 @@ function getRecord(records, domain) {
  * Logs resolved resource records from an external DNS response.
  *
  */
-function handleUpstreamResponse(packet, cacheResult = false) {
+function handleUpstreamResponse(
+    packet,
+    cacheResult = false,
+    dnsServerId = null
+) {
 
     if (!packet.answers.length) {
         return;
@@ -97,7 +101,7 @@ function handleUpstreamResponse(packet, cacheResult = false) {
 
     if (cacheResult) {
         for (const record of records.values()) {
-            cacheRecord(record);
+            cacheRecord(record, dnsServerId);
         }
     }
 

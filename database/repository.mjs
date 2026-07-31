@@ -387,15 +387,15 @@ export async function saveRecord(record) {
     const recordId = await ensureRecord(record);
 
     if (record.A.length) {
-        await upsertRecordValue(recordId, null, 'A', status, record.A);
+        await upsertRecordValue(recordId, record.dnsServerId, 'A', status, record.A);
     }
 
     if (record.AAAA.length) {
-        await upsertRecordValue(recordId, null, 'AAAA', status, record.AAAA);
+        await upsertRecordValue(recordId, record.dnsServerId, 'AAAA', status, record.AAAA);
     }
 
     if (record.CNAME.length) {
-        await upsertRecordValue(recordId, null, 'CNAME', status, record.CNAME);
+        await upsertRecordValue(recordId, record.dnsServerId, 'CNAME', status, record.CNAME);
     }
 }
 
@@ -462,9 +462,7 @@ export async function saveLookupStatus(
         dnsServerId,
         type,
         status,
-        [],
-        null,
-        null
+        []
     );
 }
 

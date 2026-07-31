@@ -36,7 +36,8 @@ export async function handleExternalRequests(
 
     await handleUpstreamResponse(
         response.packet,
-        upstream.shouldCache
+        upstream.shouldCache,
+        upstream.server.id
     );
 
     if (!debug) {

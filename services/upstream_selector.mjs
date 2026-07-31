@@ -16,7 +16,6 @@ export function selectUpstream(domain) {
     return {
         server,
         custom: !!custom,
-        shouldCache,
-        dnsServerId: server.id
+        shouldCache
     };
 }
