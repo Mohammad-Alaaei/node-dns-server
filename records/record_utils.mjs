@@ -7,6 +7,54 @@ import { Packet } from 'dns2';
 
 const SERVER_IP = config.server.ip;
 
+function selectServer(record, type) {
+    
+    // LOCAL records are authoritative.
+    if (record.source === 'LOCAL') {
+        return record.servers[0] ?? null;
+    }
+
+    const now = Date.now();
+
+    // selected server first
+    let server = record.servers.find(s =>
+        s.selected &&
+        !s.isStale &&
+        (
+            s[type].some(r => r.expiresAt > now) ||
+            s.CNAME.some(r => r.expiresAt > now)
+        )
+    );
+
+    if (server) {
+        return server;
+    }
+
+    // any valid server
+    server = record.servers.find(s =>
+        !s.isStale &&
+        (
+            s[type].some(r => r.expiresAt > now) ||
+            s.CNAME.some(r => r.expiresAt > now)
+        )
+    );
+
+    if (server) {
+        return server;
+    }
+
+    // newest stale
+    return record.servers
+        .filter(s =>
+            s.isStale &&
+            (
+                s[type].length ||
+                s.CNAME.length
+            )
+        )
+        .sort((a, b) => b.lastSuccessAt - a.lastSuccessAt)[0] ?? null;
+}
+
 /**
  * Handles record types stored locally.
  *
@@ -33,11 +81,23 @@ export async function handleLocalRecord({
         );
     }
 
+    const server = selectServer(record, type);
+
+    if (!server) {
+        return handleExternalRequests(
+            request,
+            message,
+            domain,
+            type,
+            debug
+        );
+    }
+
     // TODO: move this to a helper function
     const answers = [
-        ...record.CNAME.map(r => `CNAME=${r.domain}`),
-        ...record.A.map(r => `A=${r.address}`),
-        ...record.AAAA.map(r => `AAAA=${r.address}`)
+        ...server.CNAME.map(r => `CNAME=${r.domain}`),
+        ...server.A.map(r => `A=${r.address}`),
+        ...server.AAAA.map(r => `AAAA=${r.address}`)
     ];
 
     logger.info(`FOUND: ${answers.join(', ')}`);
@@ -46,7 +106,13 @@ export async function handleLocalRecord({
 
     const packet = createRecordResponse(
         request,
-        record,
+        {
+            ...record,
+            A: server.A,
+            AAAA: server.AAAA,
+            CNAME: server.CNAME
+        },
+        server,
         type
     );
 

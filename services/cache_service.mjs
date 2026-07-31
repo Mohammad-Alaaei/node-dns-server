@@ -1,9 +1,8 @@
 import * as logger from '../utils/logger.mjs';
 import { config } from '../config/config.mjs';
 
-import { saveRecord } from '../database/repository.mjs';
+import { loadRecords, saveRecord } from '../database/repository.mjs';
 import { mergeRecords } from '../utils/array_utils.mjs';
-import { putRecord } from '../memory/cache_memory.mjs';
 
 const FLUSH_INTERVAL_MS = config.cache.flushInterval;
 const FILTER_IPS = new Set(config.cache.filterIps);
@@ -50,6 +49,8 @@ async function flushCache() {
                 pendingCache.set(record.domain, record);
             }
         } finally {
+            await loadRecords();
+
             flushing = false;
             flushPromise = null;
         }
@@ -92,7 +93,6 @@ export function cacheRecord(record, dnsServerId = null) {
             existing.source = 'FILTERED';
         }
 
-        putRecord(existing);
 
         return;
     }
@@ -106,7 +106,6 @@ export function cacheRecord(record, dnsServerId = null) {
         record
     );
 
-    putRecord(record);
 }
 
 export async function flush() {

@@ -57,7 +57,7 @@ function appendDebugRecords(packet, request, info) {
     }
 }
 
-function createRecordResponse(request, record, requestedType) {
+function createRecordResponse(request, record,server, requestedType) {
 
     const response = Packet.createResponseFromRequest(request);
 
@@ -67,7 +67,11 @@ function createRecordResponse(request, record, requestedType) {
     while (current && !visited.has(current.domain)) {
         visited.add(current.domain);
 
-        for (const cname of current.CNAME) {
+        if (!server) {
+            break;
+        }
+
+        for (const cname of server.CNAME) {
             response.answers.push({
                 name: current.domain,
                 type: Packet.TYPE.CNAME,
@@ -77,8 +81,8 @@ function createRecordResponse(request, record, requestedType) {
             });
         }
 
-        if (current[requestedType].length) {
-            for (const value of current[requestedType]) {
+        if (server[requestedType].length) {
+            for (const value of server[requestedType]) {
                 response.answers.push({
                     name: value.name,
                     type: Packet.TYPE[requestedType],
@@ -90,12 +94,12 @@ function createRecordResponse(request, record, requestedType) {
             break;
         }
 
-        if (!current.CNAME.length) {
+        if (!server.CNAME.length) {
             break;
         }
 
         current = findRecord(
-            current.CNAME[0].domain,
+            server.CNAME[0].domain,
             requestedType
         );
     }

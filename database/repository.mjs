@@ -62,11 +62,12 @@ export async function loadRecords() {
             ON ds.id = rv.dns_server_id
 
         WHERE
+            (
             r.enabled = 1
             AND (
                 rv.id IS NULL
                 OR rv.selected = 1
-            )
+            )) OR r.source = "LOCAL"
 
         ORDER BY
             r.is_regex ASC,
@@ -109,13 +110,10 @@ export async function loadRecords() {
             }
 
         } else {
-
             record = collection.get(row.domain);
 
             if (!record) {
-
                 record = createRecord(row);
-
                 collection.set(
                     row.domain,
                     record
@@ -133,9 +131,30 @@ export async function loadRecords() {
 
         const values = JSON.parse(row.value ?? '[]');
 
+        let server = record.servers.find(
+            s => s.dnsServerId === row.dns_server_id
+        );
+
+        if (!server) {
+
+            server = {
+                dnsServerId: row.dns_server_id,
+                selected: !!row.selected,
+                status: row.status,
+                isStale: !!row.is_stale,
+                lastSuccessAt: row.last_success_at,
+
+                A: [],
+                AAAA: [],
+                CNAME: []
+            };
+
+            record.servers.push(server);
+        }
+
         switch (row.type) {
             case 'A':
-                record.A.push(
+                server.A.push(
                     ...values.map(address => ({
                         name: record.domain,
                         address,
@@ -147,7 +166,7 @@ export async function loadRecords() {
                 break;
 
             case 'AAAA':
-                record.AAAA.push(
+                server.AAAA.push(
                     ...values.map(address => ({
                         name: record.domain,
                         address,
@@ -159,7 +178,7 @@ export async function loadRecords() {
                 break;
 
             case 'CNAME':
-                record.CNAME.push(
+                server.CNAME.push(
                     ...values.map(domain => ({
                         name: record.domain,
                         domain,
@@ -195,9 +214,7 @@ function createRecord(row) {
 
         source: row.source,
 
-        A: [],
-        AAAA: [],
-        CNAME: [],
+        servers: [],
 
         hits: row.hits,
         lastHit: row.last_hit,

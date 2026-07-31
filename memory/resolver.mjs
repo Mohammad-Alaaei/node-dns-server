@@ -63,30 +63,34 @@ function isExpired(values) {
     const now = Date.now();
 
     return values.every(v =>
-        v.expiresAt !== null &&
+        v.expiresAt != null &&
         v.expiresAt <= now
     );
 }
 
 function isRecordValid(record, type) {
 
-    if (!record) {
-        console.warn('--------------NULL RECORD!')
-        return false;
+    // LOCAL records never expire.
+    if (record.source === 'LOCAL') {
+        return true;
     }
 
-    if (
-        isExpired(record.A) &&
-        isExpired(record.AAAA) &&
-        isExpired(record.CNAME)
-    ) {
-        return false;
+    for (const server of record.servers) {
+
+        if (server.isStale) {
+            continue;
+        }
+
+        if (server.CNAME.length) {
+            return true;
+        }
+
+        if (!isExpired(server[type])) {
+            return true;
+        }
     }
 
-    return (
-        record?.CNAME?.length > 0 ||
-        record[type]?.length > 0
-    );
+    return false;
 }
 
 export function findCustomDnsServer(domain) {
