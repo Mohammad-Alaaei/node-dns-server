@@ -63,6 +63,14 @@ export async function loadRecords() {
     `);
 
     for (const row of rows) {
+        
+        // skip invalid requests
+        if (
+            row.status !== RECORD_STATUS.SUCCESS &&
+            row.status !== RECORD_STATUS.FILTERED
+        ) {
+            continue;
+        }
 
         let record;
 
@@ -110,9 +118,7 @@ export async function loadRecords() {
         const values = JSON.parse(row.value ?? '[]');
 
         switch (row.type) {
-
             case 'A':
-
                 record.A.push(
                     ...values.map(address => ({
                         name: record.domain,
@@ -125,7 +131,6 @@ export async function loadRecords() {
                 break;
 
             case 'AAAA':
-
                 record.AAAA.push(
                     ...values.map(address => ({
                         name: record.domain,
@@ -138,7 +143,6 @@ export async function loadRecords() {
                 break;
 
             case 'CNAME':
-
                 record.CNAME.push(
                     ...values.map(domain => ({
                         name: record.domain,
