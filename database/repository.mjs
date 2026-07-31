@@ -42,8 +42,10 @@ export async function loadRecords() {
             r.created_at,
             r.updated_at,
 
+            rv.dns_server_id,
             rv.type,
             rv.status,
+            rv.selected,
             rv.value,
             rv.ttl,
             rv.expires_at
@@ -55,6 +57,10 @@ export async function loadRecords() {
 
         WHERE
             r.enabled = 1
+            AND (
+                rv.id IS NULL
+                OR rv.selected = 1
+            )
 
         ORDER BY
             r.is_regex ASC,
@@ -63,7 +69,7 @@ export async function loadRecords() {
     `);
 
     for (const row of rows) {
-        
+
         // skip invalid requests
         if (
             row.status !== RECORD_STATUS.SUCCESS &&
@@ -266,7 +272,8 @@ async function upsertRecordValue(
     dnsServerId,
     type,
     status,
-    values
+    values,
+    selected = false
 ) {
 
     const now = Date.now();
@@ -291,7 +298,6 @@ async function upsertRecordValue(
 
         case 'A':
         case 'AAAA':
-
             value = JSON.stringify(
                 values.map(v => v.address)
             );
@@ -299,7 +305,6 @@ async function upsertRecordValue(
             break;
 
         case 'CNAME':
-
             value = JSON.stringify(
                 values.map(v => v.domain)
             );
@@ -307,7 +312,6 @@ async function upsertRecordValue(
             break;
 
         default:
-
             value = JSON.stringify(values);
     }
 
@@ -330,6 +334,7 @@ async function upsertRecordValue(
             UPDATE record_values
             SET
                 status = ?,
+                selected = ?,
                 value = ?,
                 ttl = ?,
                 expires_at = ?,
@@ -337,6 +342,7 @@ async function upsertRecordValue(
             WHERE id = ?
         `, [
             status,
+            selected ? 1 : 0,
             value,
             ttl,
             expiresAt,
@@ -355,6 +361,7 @@ async function upsertRecordValue(
 
             type,
             status,
+            selected,
 
             value,
             ttl,
@@ -364,7 +371,7 @@ async function upsertRecordValue(
             updated_at
 
         )
-        VALUES(?,?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
     `, [
 
         recordId,
@@ -372,6 +379,7 @@ async function upsertRecordValue(
 
         type,
         status,
+        selected ? 1 : 0,
 
         value,
         ttl,
@@ -391,15 +399,15 @@ export async function saveRecord(record) {
     const recordId = await ensureRecord(record);
 
     if (record.A.length) {
-        await upsertRecordValue(recordId, record.dnsServerId, 'A', status, record.A);
+        await upsertRecordValue(recordId, record.dnsServerId, 'A', status, record.A, true);
     }
 
     if (record.AAAA.length) {
-        await upsertRecordValue(recordId, record.dnsServerId, 'AAAA', status, record.AAAA);
+        await upsertRecordValue(recordId, record.dnsServerId, 'AAAA', status, record.AAAA, true);
     }
 
     if (record.CNAME.length) {
-        await upsertRecordValue(recordId, record.dnsServerId, 'CNAME', status, record.CNAME);
+        await upsertRecordValue(recordId, record.dnsServerId, 'CNAME', status, record.CNAME, true);
     }
 }
 
@@ -466,8 +474,70 @@ export async function saveLookupStatus(
         dnsServerId,
         type,
         status,
-        []
+        [],
+        false
     );
+}
+
+export async function setSelectedVariant(
+    domain,
+    dnsServerId,
+    type
+) {
+
+    const record = await get(`
+        SELECT id
+        FROM records
+        WHERE domain = ?
+    `, [domain]);
+
+    if (!record) {
+        return;
+    }
+
+    await transaction(async () => {
+        await run(`
+            UPDATE record_values
+            SET selected = 0
+            WHERE
+                record_id = ?
+                AND type = ?
+        `, [
+            record.id,
+            type
+        ]);
+
+        await run(`
+            UPDATE record_values
+            SET selected = 1
+            WHERE
+                record_id = ?
+                AND dns_server_id IS ?
+                AND type = ?
+        `, [
+            record.id,
+            dnsServerId,
+            type
+        ]);
+
+    });
+
+    await loadRecords();
+}
+
+export async function promoteRecordToLocal(domain) {
+    await run(`
+        UPDATE records
+        SET
+            source = 'LOCAL',
+            updated_at = ?
+        WHERE domain = ?
+    `, [
+        Date.now(),
+        domain
+    ]);
+
+    await loadRecords();
 }
 
 /* -------------------------------------------------------------------------- */

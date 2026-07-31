@@ -52,6 +52,7 @@ export async function createSchema() {
             dns_server_id INTEGER,
             type TEXT NOT NULL,
             status TEXT NOT NULL,
+            selected INTEGER NOT NULL DEFAULT 0,
             value TEXT,
             ttl INTEGER,
             expires_at INTEGER,

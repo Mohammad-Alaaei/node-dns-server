@@ -1,5 +1,29 @@
 import { store } from './store.mjs';
 
+
+function selectVariant(record) {
+
+    const variants = [...record.variants.values()];
+
+    let selected = variants.find(v => v.selected);
+
+    if (selected) {
+        return selected;
+    }
+
+    selected = variants.find(
+        v => v.status === RECORD_STATUS.SUCCESS
+    );
+
+    if (selected) {
+        return selected;
+    }
+
+    return variants.find(
+        v => v.status === RECORD_STATUS.FILTERED
+    ) ?? null;
+}
+
 export function findRecord(domain, type) {
 
     const exact = store.exactRecords.get(domain);
@@ -14,7 +38,17 @@ export function findRecord(domain, type) {
             record.regex.test(domain) &&
             isRecordValid(record, type)
         ) {
-            return record;
+            const variant = selectVariant(record);
+
+            if (!variant)
+                return null;
+
+            return {
+                ...record,
+                A: variant.A,
+                AAAA: variant.AAAA,
+                CNAME: variant.CNAME
+            };
         }
     }
 
