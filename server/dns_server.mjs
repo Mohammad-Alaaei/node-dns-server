@@ -97,7 +97,7 @@ async function shutdown(signal) {
         await cacheService.shutdown();
 
         await new Promise(resolve => server.close(resolve));
-        
+
         await logger.shutdown();
 
     } catch (err) {
@@ -116,16 +116,12 @@ process.once('SIGTERM', () => {
     void shutdown('SIGTERM');
 });
 
-process.once('uncaughtException', async err => {
-    logger.error(err);
-
-    await shutdown('uncaughtException');
+process.on('uncaughtException', async err => {
+    logger.error('[uncaughtException]', err);
 });
 
-process.once('unhandledRejection', async err => {
-    logger.error(err);
-
-    await shutdown('unhandledRejection');
+process.on('unhandledRejection', async err => {
+    logger.error('[unhandledRejection]', err);
 });
 
 export {
