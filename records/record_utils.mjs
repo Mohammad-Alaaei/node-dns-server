@@ -8,8 +8,8 @@ import { RECORD_SOURCE } from '../config/constants.mjs';
 
 const SERVER_IP = config.server.ip;
 
-function selectServer(record, type) {
-    
+export function selectServer(record, type) {
+
     // LOCAL records are authoritative.
     if (record.source === RECORD_SOURCE.LOCAL) {
         return record.servers[0] ?? null;
@@ -82,7 +82,11 @@ export async function handleLocalRecord({
         );
     }
 
-    const server = selectServer(record, type);
+    const { packet, server, answers } = createRecordResponse(
+        request,
+        record,
+        type
+    );
 
     if (!server) {
         return handleExternalRequests(
@@ -94,28 +98,10 @@ export async function handleLocalRecord({
         );
     }
 
-    // TODO: move this to a helper function
-    const answers = [
-        ...server.CNAME.map(r => `CNAME=${r.domain}`),
-        ...server.A.map(r => `A=${r.address}`),
-        ...server.AAAA.map(r => `AAAA=${r.address}`)
-    ];
-
-    logger.info(`FOUND: ${answers.join(', ')}`);
+    const inlineAnswers = answers.join(', ');
+    logger.info(`FOUND: ${inlineAnswers ? inlineAnswers : '[N/A]'}`);
     console.log('=============');
     // =========================
-
-    const packet = createRecordResponse(
-        request,
-        {
-            ...record,
-            A: server.A,
-            AAAA: server.AAAA,
-            CNAME: server.CNAME
-        },
-        server,
-        type
-    );
 
     if (debug) {
         const debugAnswers = packet.answers.map(answer => {

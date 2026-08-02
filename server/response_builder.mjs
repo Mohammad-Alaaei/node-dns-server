@@ -1,6 +1,7 @@
 import { Packet } from 'dns2';
 import { config } from '../config/config.mjs';
 import { findRecord } from '../memory/resolver.mjs';
+import { selectServer } from '../records/record_utils.mjs';
 
 const DNS_TTL = config.dns.ttl;
 const DEBUG_PREFIX = config.server.debugPrefix;
@@ -57,21 +58,30 @@ function appendDebugRecords(packet, request, info) {
     }
 }
 
-function createRecordResponse(request, record,server, requestedType) {
+function createRecordResponse(request, record, requestedType) {
 
     const response = Packet.createResponseFromRequest(request);
 
     let current = record;
+    const answers = [];
+    let selectedServer = null;
     const visited = new Set();
 
     while (current && !visited.has(current.domain)) {
         visited.add(current.domain);
+        const server = selectServer(current, requestedType);
 
         if (!server) {
             break;
         }
 
+        if (!selectedServer) {
+            selectedServer = server;
+        }
+
         for (const cname of server.CNAME) {
+            answers.push(`CNAME=${cname.domain}`);
+
             response.answers.push({
                 name: current.domain,
                 type: Packet.TYPE.CNAME,
@@ -83,8 +93,10 @@ function createRecordResponse(request, record,server, requestedType) {
 
         if (server[requestedType].length) {
             for (const value of server[requestedType]) {
+                answers.push(`${requestedType}=${value.address}`);
+
                 response.answers.push({
-                    name: value.name,
+                    name: current.domain,
                     type: Packet.TYPE[requestedType],
                     class: Packet.CLASS.IN,
                     ttl: value.ttl ?? 60,
@@ -104,7 +116,11 @@ function createRecordResponse(request, record,server, requestedType) {
         );
     }
 
-    return response;
+    return {
+        packet: response,
+        server: selectedServer,
+        answers
+    };
 }
 
 function appendAddressRecords(response, record, type) {
