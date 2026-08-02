@@ -4,13 +4,14 @@ import { findRecord } from '../memory/resolver.mjs';
 import { appendDebugRecords, createRecordResponse } from '../server/response_builder.mjs';
 import { handleExternalRequests } from '../services/upstream_service.mjs';
 import { Packet } from 'dns2';
+import { RECORD_SOURCE } from '../config/constants.mjs';
 
 const SERVER_IP = config.server.ip;
 
 function selectServer(record, type) {
     
     // LOCAL records are authoritative.
-    if (record.source === 'LOCAL') {
+    if (record.source === RECORD_SOURCE.LOCAL) {
         return record.servers[0] ?? null;
     }
 

@@ -1,6 +1,6 @@
 import { all, get, run, transaction } from './sqlite.mjs';
 import { store } from '../memory/store.mjs';
-import { RECORD_STATUS } from '../config/constants.mjs';
+import { RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
 
 /* -------------------------------------------------------------------------- */
 /*                                   Hits                                     */
@@ -67,7 +67,7 @@ export async function loadRecords() {
             AND (
                 rv.id IS NULL
                 OR rv.selected = 1
-            )) OR r.source = "LOCAL"
+            )) OR r.source = "${RECORD_SOURCE.LOCAL}"
 
         ORDER BY
             r.is_regex ASC,
@@ -471,7 +471,7 @@ async function clearSelected(recordId, type) {
 
 export async function saveRecord(record) {
 
-    const status = record.source === 'FILTERED'
+    const status = record.source === RECORD_STATUS.FILTERED
         ? RECORD_STATUS.FILTERED
         : RECORD_STATUS.SUCCESS;
 
@@ -512,7 +512,7 @@ export async function enableLocalRecord(domain) {
             updated_at = ?
         WHERE
             domain = ?
-            AND source = 'LOCAL'
+            AND source = '${RECORD_SOURCE.LOCAL}'
     `, [
         Date.now(),
         domain
@@ -530,7 +530,7 @@ export async function disableLocalRecord(domain) {
             updated_at = ?
         WHERE
             domain = ?
-            AND source = 'LOCAL'
+            AND source = '${RECORD_SOURCE.LOCAL}'
     `, [
         Date.now(),
         domain
@@ -548,7 +548,7 @@ export async function saveLookupStatus(
 
     const recordId = await ensureRecord({
         domain,
-        source: 'CACHE'
+        source: RECORD_SOURCE.CACHE
     });
 
     await upsertRecordValue(
@@ -611,7 +611,7 @@ export async function promoteRecordToLocal(domain) {
     await run(`
         UPDATE records
         SET
-            source = 'LOCAL',
+            source = '${RECORD_SOURCE.LOCAL}',
             updated_at = ?
         WHERE domain = ?
     `, [

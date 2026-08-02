@@ -3,6 +3,7 @@ import { config } from '../config/config.mjs';
 
 import { loadRecords, saveRecord } from '../database/repository.mjs';
 import { mergeRecords } from '../utils/array_utils.mjs';
+import { RECORD_SOURCE } from '../config/constants.mjs';
 
 const FLUSH_INTERVAL_MS = config.cache.flushInterval;
 const FILTER_IPS = new Set(config.cache.filterIps);
@@ -71,8 +72,8 @@ export function cacheRecord(record, dnsServerId = null) {
     const source =
         [...record.A, ...record.AAAA]
             .some(r => FILTER_IPS.has(r.address))
-            ? 'FILTERED'
-            : 'CACHE';
+            ? RECORD_SOURCE.FILTERED
+            : RECORD_SOURCE.CACHE;
 
     record.source = source;
     record.dnsServerId = dnsServerId;
@@ -89,8 +90,8 @@ export function cacheRecord(record, dnsServerId = null) {
         existing.lastHit = now;
         existing.dnsServerId = dnsServerId;
 
-        if (source === 'FILTERED') {
-            existing.source = 'FILTERED';
+        if (source === RECORD_SOURCE.FILTERED) {
+            existing.source = RECORD_SOURCE.FILTERED;
         }
 
 

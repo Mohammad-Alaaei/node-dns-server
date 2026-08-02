@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 
 import { transaction, run } from './sqlite.mjs';
+import { RECORD_SOURCE } from '../config/constants.mjs';
 
 const DOMAIN_FILE = process.env.DOMAIN_FILE ?? 'domains.txt';
 
@@ -72,7 +73,7 @@ export async function importDomains() {
 
         await run(`
             DELETE FROM records
-            WHERE source = 'LOCAL'
+            WHERE source = '${RECORD_SOURCE.LOCAL}'
         `);
 
         for (const [domain, record] of records) {
@@ -93,7 +94,7 @@ export async function importDomains() {
                 domain,
                 1,
                 record.regex ? 1 : 0,
-                'LOCAL',
+                RECORD_SOURCE.LOCAL,
                 0,
                 null,
                 now,

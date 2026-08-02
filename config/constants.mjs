@@ -22,3 +22,9 @@ export const RECORD_STATUS = {
     SERVFAIL: 'SERVFAIL',
     REFUSED: 'REFUSED'
 };
+
+export const RECORD_SOURCE = {
+    LOCAL: 'LOCAL',
+    CACHE: 'CACHE',
+    FILTERED: 'FILTERED'
+}

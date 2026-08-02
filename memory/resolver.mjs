@@ -1,3 +1,4 @@
+import { RECORD_SOURCE } from '../config/constants.mjs';
 import { store } from './store.mjs';
 
 
@@ -71,7 +72,7 @@ function isExpired(values) {
 function isRecordValid(record, type) {
 
     // LOCAL records never expire.
-    if (record.source === 'LOCAL') {
+    if (record.source === RECORD_SOURCE.LOCAL) {
         return true;
     }
 
