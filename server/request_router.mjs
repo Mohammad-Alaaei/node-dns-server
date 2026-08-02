@@ -9,6 +9,7 @@ import { handleAAAARequest } from '../records/aaaa_record.mjs';
 import { handlePtrRequest } from '../records/ptr_record.mjs';
 import { handleOtherRequest } from '../records/other_records.mjs';
 import { DNS_TYPES } from '../config/constants.mjs';
+import { handleCNAMERequest } from '../records/cname_record.mjs';
 
 const DEBUG_PREFIX = config.server.debugPrefix;
 
