@@ -88,7 +88,10 @@ export async function handleLocalRecord({
         type
     );
 
-    if (!server) {
+    if (!server || (
+        !server[type].length &&
+        !server.CNAME.length
+    )) {
         return handleExternalRequests(
             request,
             message,

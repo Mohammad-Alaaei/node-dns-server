@@ -243,7 +243,6 @@ async function ensureRecord(record) {
             SET
                 enabled = ?,
                 is_regex = ?,
-                source = ?,
                 hits = ?,
                 last_hit = ?,
                 updated_at = ?
@@ -251,7 +250,6 @@ async function ensureRecord(record) {
         `, [
             record.enabled ?? 1,
             record.isRegex ? 1 : 0,
-            record.source,
             record.hits ?? 0,
             record.lastHit,
             now,
@@ -469,6 +467,44 @@ async function clearSelected(recordId, type) {
     ]);
 }
 
+async function updateRecordSource(recordId) {
+
+    const record = await get(`
+        SELECT source
+        FROM records
+        WHERE id = ?
+    `, [recordId]);
+
+    // LOCAL is permanent unless changed manually.
+    if (record.source === RECORD_SOURCE.LOCAL) {
+        return;
+    }
+
+    const rows = await all(`
+        SELECT status
+        FROM record_values
+        WHERE record_id = ?
+    `, [recordId]);
+
+    const source =
+        rows.length &&
+            rows.every(r => r.status === RECORD_STATUS.FILTERED)
+            ? RECORD_SOURCE.FILTERED
+            : RECORD_SOURCE.CACHE;
+
+    await run(`
+        UPDATE records
+        SET
+            source = ?,
+            updated_at = ?
+        WHERE id = ?
+    `, [
+        source,
+        Date.now(),
+        recordId
+    ]);
+}
+
 export async function saveRecord(record) {
 
     const status = record.source === RECORD_STATUS.FILTERED
@@ -491,6 +527,8 @@ export async function saveRecord(record) {
         await clearSelected(recordId, 'CNAME');
         await upsertRecordValue(recordId, record.dnsServerId, 'CNAME', status, record.CNAME, true);
     }
+
+    await updateRecordSource(recordId);
 }
 
 export async function deleteRecord(domain) {
@@ -559,6 +597,8 @@ export async function saveLookupStatus(
         [],
         false
     );
+
+    await updateRecordSource(recordId);
 }
 
 export async function setSelectedVariant(

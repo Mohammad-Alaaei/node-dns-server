@@ -73,7 +73,16 @@ function isRecordValid(record, type) {
 
     // LOCAL records never expire.
     if (record.source === RECORD_SOURCE.LOCAL) {
-        return true;
+        const server = record.servers[0];
+
+        // local requests are only valid if we have actual requested type
+        return (
+            server &&
+            (
+                server[type].length > 0 ||
+                server.CNAME.length > 0
+            )
+        );
     }
 
     for (const server of record.servers) {
