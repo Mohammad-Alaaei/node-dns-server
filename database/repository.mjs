@@ -129,7 +129,18 @@ export async function loadRecords() {
             continue;
         }
 
-        const values = JSON.parse(row.value ?? '[]');
+        let values = [];
+
+        try {
+            values = JSON.parse(row.value ?? '[]');
+        } catch (err) {
+            console.error(`Failed to load data`, {
+                domain: row.domain,
+                values: row.value
+            }, err);
+
+            throw new Error(err);
+        }
 
         let server = record.servers.find(
             s => s.dnsServerId === row.dns_server_id
