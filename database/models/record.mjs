@@ -8,7 +8,8 @@ export const Record = sequelize.define('records', {
     },
     domain: {
         type: DataTypes.STRING(255),
-        allowNull: false
+        allowNull: false,
+        unique: true
     },
     enabled: {
         type: DataTypes.BOOLEAN,
@@ -44,8 +45,6 @@ export const Record = sequelize.define('records', {
 }, {
     tableName: 'records',
     indexes: [
-        { unique: true, fields: ['domain', 'source'], name: 'idx_records_domain_source' },
-        { fields: ['domain'] },
-        { fields: ['source'] }
+        { fields: ['source'], name: 'idx_records_source' }
     ]
 });

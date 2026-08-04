@@ -3,7 +3,6 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
-
     await queryInterface.createTable('records', {
       id: {
         type: Sequelize.INTEGER.UNSIGNED,
@@ -12,7 +11,8 @@ module.exports = {
       },
       domain: {
         type: Sequelize.STRING(255),
-        allowNull: false
+        allowNull: false,
+        unique: true
       },
       enabled: {
         type: Sequelize.BOOLEAN,
@@ -47,13 +47,6 @@ module.exports = {
       }
     });
 
-    await queryInterface.addIndex('records', ['domain', 'source'], {
-      unique: true,
-      name: 'idx_records_domain_source'
-    });
-    await queryInterface.addIndex('records', ['domain'], {
-      name: 'idx_records_domain'
-    });
     await queryInterface.addIndex('records', ['source'], {
       name: 'idx_records_source'
     });
