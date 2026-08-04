@@ -1,6 +1,5 @@
-import { RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
+import { RECORD_SOURCE } from '../config/constants.mjs';
 import { store } from './store.mjs';
-
 
 function isExpired(values) {
     if (!values.length) {
@@ -31,8 +30,8 @@ function isRecordValid(record, type) {
         return (
             server &&
             (
-                server[type].length > 0 ||
-                server.CNAME.length > 0
+                (server[type] && server[type].length > 0) ||
+                (server.CNAME && server.CNAME.length > 0)
             )
         );
     }
@@ -40,19 +39,17 @@ function isRecordValid(record, type) {
     for (const server of record.servers) {
 
         const hasType =
-            server[type].length > 0 ||
-            server.CNAME.length > 0;
+            (server[type] && server[type].length > 0) ||
+            (server.CNAME && server.CNAME.length > 0);
 
         if (!hasType) {
             continue;
         }
 
-        // Stale (FILTERED transition) → still servable.
         if (server.isStale) {
             return true;
         }
 
-        // Fresh non-expired.
         if (server.CNAME.length && !isExpired(server.CNAME)) {
             return true;
         }
@@ -77,12 +74,10 @@ export function findRecord(domain, type) {
     }
 
     for (const record of store.regexRecords) {
-
         if (
             record.regex.test(domain) &&
             isRecordValid(record, type)
         ) {
-            // Same shape as exact — selectServer picks the variant.
             return record;
         }
     }
@@ -114,9 +109,25 @@ export function findStoredRecord(domain) {
     return null;
 }
 
-/**
- * Map dnsServerId from a record back to a live upstream server object.
- */
+export function hasLocalRecord(domain) {
+    const exact = store.exactRecords.get(domain);
+
+    if (exact && exact.source === RECORD_SOURCE.LOCAL) {
+        return true;
+    }
+
+    for (const record of store.regexRecords) {
+        if (
+            record.source === RECORD_SOURCE.LOCAL &&
+            record.regex.test(domain)
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 export function findServerById(dnsServerId) {
 
     if (dnsServerId == null) {
@@ -183,9 +194,7 @@ export function getDefaultDnsServer() {
         throw new Error('No default DNS server configured.');
     }
 
-    const server = store.defaultDnsServers[
+    return store.defaultDnsServers[
         defaultIndex++ % store.defaultDnsServers.length
     ];
-
-    return server;
 }

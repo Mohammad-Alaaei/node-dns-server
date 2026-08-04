@@ -57,6 +57,7 @@ export async function loadRecords() {
             }
         ],
         order: [
+            [sequelize.literal(`CASE WHEN source = '${RECORD_SOURCE.LOCAL}' THEN 0 ELSE 1 END`), 'ASC'],
             ['is_regex', 'ASC'],
             [sequelize.fn('LENGTH', sequelize.col('records.domain')), 'DESC'],
             ['domain', 'ASC']
@@ -186,23 +187,25 @@ function createRecord(row) {
  */
 async function ensureRecord(record) {
     const now = Date.now();
-    const source = record.source ?? RECORD_SOURCE.CACHE;
+    const requestedSource = record.source ?? RECORD_SOURCE.CACHE;
 
     const existing = await Record.findOne({
-        where: {
-            domain: record.domain,
-            source
-        }
+        where: { domain: record.domain }
     });
 
     if (existing) {
-        await existing.update({
-            enabled: record.enabled ?? true,
-            is_regex: !!record.isRegex,
+        const updates = {
             hits: record.hits ?? existing.hits ?? 0,
             last_hit: record.lastHit ?? existing.last_hit,
             updated_at: now
-        });
+        };
+
+        if (existing.source !== RECORD_SOURCE.LOCAL) {
+            updates.enabled = record.enabled ?? true;
+            updates.is_regex = !!record.isRegex;
+        }
+
+        await existing.update(updates);
         return existing.id;
     }
 
@@ -210,7 +213,7 @@ async function ensureRecord(record) {
         domain: record.domain,
         enabled: record.enabled ?? true,
         is_regex: !!record.isRegex,
-        source,
+        source: requestedSource,
         hits: record.hits ?? 0,
         last_hit: record.lastHit ?? null,
         created_at: now,
@@ -358,11 +361,18 @@ async function updateRecordSource(recordId) {
 }
 
 export async function saveRecord(record) {
+    const existing = await Record.findOne({
+        where: { domain: record.domain }
+    });
+
+    if (existing?.source === RECORD_SOURCE.LOCAL) {
+        return;
+    }
+
     const status = record.source === RECORD_SOURCE.FILTERED
         ? RECORD_STATUS.FILTERED
         : RECORD_STATUS.SUCCESS;
 
-    // Force CACHE/FILTERED so ensureRecord never touches LOCAL rows.
     const source = record.source === RECORD_SOURCE.FILTERED
         ? RECORD_SOURCE.FILTERED
         : RECORD_SOURCE.CACHE;
@@ -422,20 +432,18 @@ export async function disableLocalRecord(domain) {
 }
 
 export async function saveLookupStatus(domain, dnsServerId, type, status) {
+    const existing = await Record.findOne({ where: { domain } });
+
+    if (existing?.source === RECORD_SOURCE.LOCAL) {
+        return;
+    }
+
     const recordId = await ensureRecord({
         domain,
         source: RECORD_SOURCE.CACHE
     });
 
-    await upsertRecordValue(
-        recordId,
-        dnsServerId,
-        type,
-        status,
-        [],
-        false
-    );
-
+    await upsertRecordValue(recordId, dnsServerId, type, status, [], false);
     await updateRecordSource(recordId);
 }
 

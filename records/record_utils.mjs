@@ -3,7 +3,8 @@ import { config } from '../config/config.mjs';
 import {
     findRecord,
     findStoredRecord,
-    getPreferredServer
+    getPreferredServer,
+    hasLocalRecord
 } from '../memory/resolver.mjs';
 import { appendDebugRecords, createRecordResponse } from '../server/response_builder.mjs';
 import { handleExternalRequests } from '../services/upstream_service.mjs';
@@ -21,7 +22,6 @@ export function selectServer(record, type) {
 
     const now = Date.now();
 
-    // 1) selected + not stale + not expired
     let server = record.servers.find(s =>
         s.selected &&
         !s.isStale &&
@@ -35,7 +35,6 @@ export function selectServer(record, type) {
         return server;
     }
 
-    // 2) any not stale + not expired
     server = record.servers.find(s =>
         !s.isStale &&
         (
@@ -48,14 +47,10 @@ export function selectServer(record, type) {
         return server;
     }
 
-    // 3) stale fallback (FILTERED — still serve old cached values)
     return record.servers
         .filter(s =>
             s.isStale &&
-            (
-                s[type].length ||
-                s.CNAME.length
-            )
+            (s[type].length || s.CNAME.length)
         )
         .sort((a, b) => (b.lastSuccessAt ?? 0) - (a.lastSuccessAt ?? 0))[0] ?? null;
 }
@@ -96,13 +91,16 @@ export async function handleLocalRecord({
                         case Packet.TYPE.A:
                         case Packet.TYPE.AAAA:
                             return answer.address;
+                            break;
 
                         case Packet.TYPE.CNAME:
                         case Packet.TYPE.PTR:
                             return answer.domain;
+                            break;
 
                         case Packet.TYPE.MX:
                             return answer.exchange;
+                            break;
 
                         default:
                             return null;
@@ -117,15 +115,16 @@ export async function handleLocalRecord({
                 });
             }
 
-            return {
-                packet,
-                buffer: null
-            };
+            return { packet, buffer: null };
         }
+
+        if (record.source === RECORD_SOURCE.LOCAL) {
+            logger.info(`LOCAL ${domain} has no ${type}; forwarding upstream`);
+        }
+    } else if (hasLocalRecord(domain)) {
+        logger.info(`LOCAL ${domain} missing type ${type}; forwarding upstream`);
     }
 
-    // No servable answer: re-resolve.
-    // Prefer the record's previously selected upstream when we still know it.
     const stored = findStoredRecord(domain);
     const preferred = stored
         ? getPreferredServer(stored, type)

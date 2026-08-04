@@ -4,6 +4,7 @@ import { config } from '../config/config.mjs';
 import { loadRecords, saveRecord } from '../database/repository.mjs';
 import { mergeRecords } from '../utils/array_utils.mjs';
 import { RECORD_SOURCE } from '../config/constants.mjs';
+import { hasLocalRecord } from '../memory/resolver.mjs';
 
 const FLUSH_INTERVAL_MS = config.cache.flushInterval;
 const FILTER_IPS = new Set(config.cache.filterIps);
@@ -38,6 +39,9 @@ async function flushCache() {
         try {
             for (const record of records) {
                 try {
+                    if (hasLocalRecord(record.domain)) {
+                        continue;
+                    }
                     await saveRecord(record);
                 } catch (err) {
                     logger.error(err);
@@ -66,6 +70,10 @@ async function flushCache() {
 /* -------------------------------------------------------------------------- */
 
 export function cacheRecord(record, dnsServerId = null) {
+
+    if (hasLocalRecord(record.domain)) {
+        return;
+    }
 
     const now = Date.now();
 
