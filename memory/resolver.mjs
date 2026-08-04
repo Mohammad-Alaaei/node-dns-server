@@ -1,60 +1,6 @@
-import { RECORD_SOURCE } from '../config/constants.mjs';
+import { RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
 import { store } from './store.mjs';
 
-
-function selectVariant(record) {
-
-    const variants = [...record.variants.values()];
-
-    let selected = variants.find(v => v.selected);
-
-    if (selected) {
-        return selected;
-    }
-
-    selected = variants.find(
-        v => v.status === RECORD_STATUS.SUCCESS
-    );
-
-    if (selected) {
-        return selected;
-    }
-
-    return variants.find(
-        v => v.status === RECORD_STATUS.FILTERED
-    ) ?? null;
-}
-
-export function findRecord(domain, type) {
-
-    const exact = store.exactRecords.get(domain);
-
-    if (exact && isRecordValid(exact, type)) {
-        return exact;
-    }
-
-    for (const record of store.regexRecords) {
-
-        if (
-            record.regex.test(domain) &&
-            isRecordValid(record, type)
-        ) {
-            const variant = selectVariant(record);
-
-            if (!variant)
-                return null;
-
-            return {
-                ...record,
-                A: variant.A,
-                AAAA: variant.AAAA,
-                CNAME: variant.CNAME
-            };
-        }
-    }
-
-    return null;
-}
 
 function isExpired(values) {
     if (!values.length) {
@@ -69,13 +15,19 @@ function isExpired(values) {
     );
 }
 
+/**
+ * A record is servable when:
+ * - LOCAL and has values, or
+ * - has non-expired non-stale values, or
+ * - has stale values (FILTERED fallback — still serve old payload).
+ *
+ * Purely expired non-stale CACHE is NOT servable → triggers re-resolve.
+ */
 function isRecordValid(record, type) {
 
-    // LOCAL records never expire.
     if (record.source === RECORD_SOURCE.LOCAL) {
         const server = record.servers[0];
 
-        // local requests are only valid if we have actual requested type
         return (
             server &&
             (
@@ -87,20 +39,124 @@ function isRecordValid(record, type) {
 
     for (const server of record.servers) {
 
-        if (server.isStale) {
+        const hasType =
+            server[type].length > 0 ||
+            server.CNAME.length > 0;
+
+        if (!hasType) {
             continue;
         }
 
-        if (server.CNAME.length) {
+        // Stale (FILTERED transition) → still servable.
+        if (server.isStale) {
             return true;
         }
 
-        if (!isExpired(server[type])) {
+        // Fresh non-expired.
+        if (server.CNAME.length && !isExpired(server.CNAME)) {
+            return true;
+        }
+
+        if (server[type].length && !isExpired(server[type])) {
             return true;
         }
     }
 
     return false;
+}
+
+/**
+ * Find an exact/regex record that can be served right now.
+ */
+export function findRecord(domain, type) {
+
+    const exact = store.exactRecords.get(domain);
+
+    if (exact && isRecordValid(exact, type)) {
+        return exact;
+    }
+
+    for (const record of store.regexRecords) {
+
+        if (
+            record.regex.test(domain) &&
+            isRecordValid(record, type)
+        ) {
+            // Same shape as exact — selectServer picks the variant.
+            return record;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Find a stored record even if expired (for preferred-server re-resolve).
+ * Skips LOCAL (authoritative, never re-resolved upstream).
+ */
+export function findStoredRecord(domain) {
+
+    const exact = store.exactRecords.get(domain);
+
+    if (exact && exact.source !== RECORD_SOURCE.LOCAL) {
+        return exact;
+    }
+
+    for (const record of store.regexRecords) {
+        if (
+            record.regex.test(domain) &&
+            record.source !== RECORD_SOURCE.LOCAL
+        ) {
+            return record;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Map dnsServerId from a record back to a live upstream server object.
+ */
+export function findServerById(dnsServerId) {
+
+    if (dnsServerId == null) {
+        return null;
+    }
+
+    for (const server of store.defaultDnsServers) {
+        if (server.id === dnsServerId) {
+            return server;
+        }
+    }
+
+    for (const group of store.customDnsServers) {
+        for (const server of group.servers) {
+            if (server.id === dnsServerId) {
+                return server;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Preferred (selected) upstream for an existing record + type.
+ */
+export function getPreferredServer(record, type) {
+
+    if (!record?.servers?.length) {
+        return null;
+    }
+
+    const selected = record.servers.find(s =>
+        s.selected &&
+        (s[type]?.length || s.CNAME?.length || s.dnsServerId != null)
+    );
+
+    const candidate = selected ?? record.servers[0];
+
+    return findServerById(candidate?.dnsServerId) ?? null;
 }
 
 export function findCustomDnsServer(domain) {

@@ -90,10 +90,8 @@ export function cacheRecord(record, dnsServerId = null) {
         existing.lastHit = now;
         existing.dnsServerId = dnsServerId;
 
-        if (source === RECORD_SOURCE.FILTERED) {
-            existing.source = RECORD_SOURCE.FILTERED;
-        }
-
+        // Escalate to FILTERED, or demote back to CACHE when a clean answer arrives.
+        existing.source = source;
 
         return;
     }

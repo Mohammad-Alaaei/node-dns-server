@@ -4,7 +4,15 @@ import { CACHE_LEVELS } from '../config/constants.mjs';
 
 const CACHE_LEVEL = config.cache.level;
 
-export function selectUpstream(domain) {
+export function selectUpstream(domain, preferredServer = null) {
+
+    if (preferredServer) {
+        return {
+            server: preferredServer,
+            custom: false,
+            shouldCache: CACHE_LEVEL !== CACHE_LEVELS.NONE
+        };
+    }
 
     const custom = findCustomDnsServer(domain);
     const server = custom ?? getDefaultDnsServer();

@@ -1,6 +1,10 @@
 import * as logger from '../utils/logger.mjs';
 import { config } from '../config/config.mjs';
-import { findRecord } from '../memory/resolver.mjs';
+import {
+    findRecord,
+    findStoredRecord,
+    getPreferredServer
+} from '../memory/resolver.mjs';
 import { appendDebugRecords, createRecordResponse } from '../server/response_builder.mjs';
 import { handleExternalRequests } from '../services/upstream_service.mjs';
 import { Packet } from 'dns2';
@@ -17,7 +21,7 @@ export function selectServer(record, type) {
 
     const now = Date.now();
 
-    // selected server first
+    // 1) selected + not stale + not expired
     let server = record.servers.find(s =>
         s.selected &&
         !s.isStale &&
@@ -31,7 +35,7 @@ export function selectServer(record, type) {
         return server;
     }
 
-    // any valid server
+    // 2) any not stale + not expired
     server = record.servers.find(s =>
         !s.isStale &&
         (
@@ -44,7 +48,7 @@ export function selectServer(record, type) {
         return server;
     }
 
-    // newest stale
+    // 3) stale fallback (FILTERED — still serve old cached values)
     return record.servers
         .filter(s =>
             s.isStale &&
@@ -53,14 +57,11 @@ export function selectServer(record, type) {
                 s.CNAME.length
             )
         )
-        .sort((a, b) => b.lastSuccessAt - a.lastSuccessAt)[0] ?? null;
+        .sort((a, b) => (b.lastSuccessAt ?? 0) - (a.lastSuccessAt ?? 0))[0] ?? null;
 }
 
 /**
  * Handles record types stored locally.
- *
- * @param {object} options
- * @returns {Promise<{packet: object|null, buffer: Buffer|null}>}
  */
 export async function handleLocalRecord({
     request,
@@ -72,70 +73,70 @@ export async function handleLocalRecord({
 
     const record = findRecord(domain, type);
 
-    if (!record) {
-        return handleExternalRequests(
+    if (record) {
+
+        const { packet, server, answers } = createRecordResponse(
             request,
-            message,
-            domain,
-            type,
-            debug
+            record,
+            type
         );
-    }
 
-    const { packet, server, answers } = createRecordResponse(
-        request,
-        record,
-        type
-    );
+        if (server && (
+            server[type].length ||
+            server.CNAME.length
+        )) {
 
-    if (!server || (
-        !server[type].length &&
-        !server.CNAME.length
-    )) {
-        return handleExternalRequests(
-            request,
-            message,
-            domain,
-            type,
-            debug
-        );
-    }
+            const inlineAnswers = answers.join(', ');
+            logger.info(`FOUND: ${inlineAnswers ? inlineAnswers : '[N/A]'}`);
+            console.log('=============');
 
-    const inlineAnswers = answers.join(', ');
-    logger.info(`FOUND: ${inlineAnswers ? inlineAnswers : '[N/A]'}`);
-    console.log('=============');
-    // =========================
+            if (debug) {
+                const debugAnswers = packet.answers.map(answer => {
+                    switch (answer.type) {
+                        case Packet.TYPE.A:
+                        case Packet.TYPE.AAAA:
+                            return answer.address;
 
-    if (debug) {
-        const debugAnswers = packet.answers.map(answer => {
-            switch (answer.type) {
-                case Packet.TYPE.A:
-                case Packet.TYPE.AAAA:
-                    return answer.address;
+                        case Packet.TYPE.CNAME:
+                        case Packet.TYPE.PTR:
+                            return answer.domain;
 
-                case Packet.TYPE.CNAME:
-                case Packet.TYPE.PTR:
-                    return answer.domain;
+                        case Packet.TYPE.MX:
+                            return answer.exchange;
 
-                case Packet.TYPE.MX:
-                    return answer.exchange;
+                        default:
+                            return null;
+                    }
+                }).filter(Boolean);
 
-                default:
-                    return null;
+                appendDebugRecords(packet, request, {
+                    resolver: 'Local',
+                    server: SERVER_IP,
+                    type,
+                    answers: debugAnswers
+                });
             }
 
-        }).filter(Boolean);
-
-        appendDebugRecords(packet, request, {
-            resolver: 'Local',
-            server: SERVER_IP,
-            type,
-            answers: debugAnswers
-        });
+            return {
+                packet,
+                buffer: null
+            };
+        }
     }
 
-    return {
-        packet,
-        buffer: null
-    };
+    // No servable answer: re-resolve.
+    // Prefer the record's previously selected upstream when we still know it.
+    const stored = findStoredRecord(domain);
+    const preferred = stored
+        ? getPreferredServer(stored, type)
+        : null;
+
+    return handleExternalRequests(
+        request,
+        message,
+        domain,
+        type,
+        debug,
+        preferred
+    );
 }

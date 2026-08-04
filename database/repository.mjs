@@ -49,7 +49,7 @@ export async function loadRecords() {
             rv.value,
             rv.ttl,
             rv.expires_at,
-            rv.selected,
+            rv.is_stale,
             rv.last_success_at,
             ds.average_latency
 
@@ -81,8 +81,9 @@ export async function loadRecords() {
 
     for (const row of rows) {
 
-        // skip invalid requests
+        // Only SUCCESS and FILTERED values are usable for answers.
         if (
+            row.status != null &&
             row.status !== RECORD_STATUS.SUCCESS &&
             row.status !== RECORD_STATUS.FILTERED
         ) {
@@ -125,7 +126,11 @@ export async function loadRecords() {
             continue;
         }
 
-        if (row.status !== RECORD_STATUS.SUCCESS) {
+        // SUCCESS and FILTERED both load values (FILTERED are stale fallbacks).
+        if (
+            row.status !== RECORD_STATUS.SUCCESS &&
+            row.status !== RECORD_STATUS.FILTERED
+        ) {
             continue;
         }
 
@@ -140,6 +145,11 @@ export async function loadRecords() {
             }, err);
 
             throw new Error(err);
+        }
+
+        // Skip empty payloads.
+        if (!values.length) {
+            continue;
         }
 
         let server = record.servers.find(
@@ -173,7 +183,6 @@ export async function loadRecords() {
                         expiresAt: row.expires_at
                     }))
                 );
-
                 break;
 
             case 'AAAA':
@@ -185,7 +194,6 @@ export async function loadRecords() {
                         expiresAt: row.expires_at
                     }))
                 );
-
                 break;
 
             case 'CNAME':
@@ -197,7 +205,6 @@ export async function loadRecords() {
                         expiresAt: row.expires_at
                     }))
                 );
-
                 break;
         }
     }
@@ -238,13 +245,18 @@ function createRecord(row) {
 async function ensureRecord(record) {
 
     const now = Date.now();
+    const source = record.source ?? RECORD_SOURCE.CACHE;
 
+    // Automatic paths must never attach to a LOCAL row.
+    // Lookup is scoped to domain + source (matches unique index).
     const existing = await get(`
-        SELECT id
+        SELECT id, source
         FROM records
         WHERE domain = ?
+          AND source = ?
     `, [
-        record.domain
+        record.domain,
+        source
     ]);
 
     if (existing) {
@@ -291,7 +303,7 @@ async function ensureRecord(record) {
         record.domain,
         record.enabled ?? 1,
         record.isRegex ? 1 : 0,
-        record.source,
+        source,
 
         record.hits ?? 0,
         record.lastHit,
@@ -369,19 +381,31 @@ async function upsertRecordValue(
         }
 
         lastSuccessAt = now;
-        isStale = 0;
+        isStale = 0;          // SUCCESS clears stale for this type
         selectedValue = selected ? 1 : 0;
     }
-    else {
-        const hasSuccessfulValue = existing?.last_success_at != null;
-        // Never overwrite a previously successful value.
-        if (
-            existing && hasSuccessfulValue
-        ) {
+    else if (status === RECORD_STATUS.FILTERED) {
+
+        // Keep previous cached payload; only mark FILTERED + stale.
+        // If there was no previous value, still store status as FILTERED.
+        if (existing?.value != null) {
             value = existing.value;
             ttl = existing.ttl;
             expiresAt = existing.expires_at;
+            lastSuccessAt = existing.last_success_at;
+        }
 
+        isStale = 1;
+        selectedValue = existing?.selected ?? (selected ? 1 : 0);
+    }
+    else {
+        // TIMEOUT / NXDOMAIN / SERVFAIL / REFUSED / empty
+        const hasSuccessfulValue = existing?.last_success_at != null;
+
+        if (existing && hasSuccessfulValue) {
+            value = existing.value;
+            ttl = existing.ttl;
+            expiresAt = existing.expires_at;
             selectedValue = existing.selected;
             isStale = 1;
         }
@@ -389,7 +413,6 @@ async function upsertRecordValue(
             value = null;
             ttl = null;
             expiresAt = null;
-
             selectedValue = 0;
             isStale = 1;
         }
@@ -487,7 +510,7 @@ async function updateRecordSource(recordId) {
     `, [recordId]);
 
     // LOCAL is permanent unless changed manually.
-    if (record.source === RECORD_SOURCE.LOCAL) {
+    if (!record || record.source === RECORD_SOURCE.LOCAL) {
         return;
     }
 
@@ -518,11 +541,21 @@ async function updateRecordSource(recordId) {
 
 export async function saveRecord(record) {
 
-    const status = record.source === RECORD_STATUS.FILTERED
+    // record.source is RECORD_SOURCE (CACHE | FILTERED), never LOCAL here.
+    const status = record.source === RECORD_SOURCE.FILTERED
         ? RECORD_STATUS.FILTERED
         : RECORD_STATUS.SUCCESS;
 
-    const recordId = await ensureRecord(record);
+    // Force CACHE/FILTERED source so ensureRecord never touches LOCAL rows.
+    const source =
+        record.source === RECORD_SOURCE.FILTERED
+            ? RECORD_SOURCE.FILTERED
+            : RECORD_SOURCE.CACHE;
+
+    const recordId = await ensureRecord({
+        ...record,
+        source
+    });
 
     if (record.A.length) {
         await clearSelected(recordId, 'A');
