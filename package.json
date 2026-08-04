@@ -5,6 +5,8 @@
   "scripts": {
     "start": "node main.mjs",
     "test": "node --test tests/**/*.test.mjs",
+    "test:unit": "node --test tests/source-state.test.mjs tests/local-isolation.test.mjs",
+    "test:integration": "node --test tests/repository.integration.test.mjs",
     "db:create": "node scripts/create-db.mjs",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
