@@ -1,4 +1,5 @@
-import { CACHE_LEVELS } from "./constants.mjs";
+import 'dotenv/config';
+import { CACHE_LEVELS } from './constants.mjs';
 
 export const config = {
 
@@ -17,11 +18,28 @@ export const config = {
 
     cache: {
         level: process.env.CACHE_LEVEL ?? CACHE_LEVELS.CUSTOM_ONLY,
-        expireTime: process.env.CACHE_EXPIRE_TIME ?? 60,
+        expireTime: Number(process.env.CACHE_EXPIRE_TIME ?? 60),
         flushInterval: Number(process.env.FLUSH_INTERVAL_MS ?? 60000),
         filterIps: (process.env.FILTER_IPS ?? '')
             .split(/\s+/)
             .filter(Boolean)
+    },
+
+    db: {
+        host: process.env.DB_HOST ?? '127.0.0.1',
+        port: Number(process.env.DB_PORT ?? 3306),
+        name: process.env.DB_NAME ?? 'dns_server',
+        user: process.env.DB_USER ?? 'dns',
+        password: process.env.DB_PASSWORD ?? '',
+        pool: {
+            max: Number(process.env.DB_POOL_MAX ?? 10),
+            min: Number(process.env.DB_POOL_MIN ?? 0),
+            acquire: Number(process.env.DB_POOL_ACQUIRE ?? 30000),
+            idle: Number(process.env.DB_POOL_IDLE ?? 10000)
+        },
+        logging: process.env.DB_LOGGING === 'true'
     }
 
 };
+
+export default config;

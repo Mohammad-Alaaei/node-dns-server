@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { config } from './config/config.mjs';
 
 import { createSchema } from './database/schema.mjs';
@@ -10,8 +9,8 @@ import * as cacheService from './services/cache_service.mjs';
 import { startServer } from './server/dns_server.mjs';
 import { store } from './memory/store.mjs';
 import { CACHE_LEVELS } from './config/constants.mjs';
-import { importDomains } from './database/import_domains.mjs';
-import { importCustomDnsServers } from './database/import_custom_dns.mjs';
+// import { importDomains } from './database/import_domains.mjs';
+// import { importCustomDnsServers } from './database/import_custom_dns.mjs';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */

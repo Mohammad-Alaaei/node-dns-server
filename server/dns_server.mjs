@@ -1,6 +1,6 @@
 import dgram from 'node:dgram';
 
-import { close as closeDatabase } from "../database/sqlite.mjs";
+import { close as closeDatabase } from "../database/connection.mjs";
 import * as logger from '../utils/logger.mjs';
 import * as cacheService from '../services/cache_service.mjs';
 import { handleRequest } from './request_router.mjs';
