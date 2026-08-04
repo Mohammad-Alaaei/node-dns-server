@@ -2,25 +2,17 @@ import { Packet } from 'dns2';
 import * as logger from '../utils/logger.mjs';
 import { cacheRecord } from './cache_service.mjs';
 import { config } from '../config/config.mjs';
+import { normalizeDomain } from '../utils/domain_utils.mjs';
 
 const CACHE_EXPIRE_TIME = config.cache.expireTime;
 
 function getRecord(records, domain) {
-
-    let record = records.get(domain);
-
+    const key = normalizeDomain(domain);
+    let record = records.get(key);
     if (!record) {
-
-        record = {
-            domain,
-            A: [],
-            AAAA: [],
-            CNAME: [],
-        };
-
-        records.set(domain, record);
+        record = { domain: key, A: [], AAAA: [], CNAME: [] };
+        records.set(key, record);
     }
-
     return record;
 }
 

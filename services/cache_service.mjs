@@ -5,6 +5,8 @@ import { loadRecords, saveRecord } from '../database/repository.mjs';
 import { mergeRecords } from '../utils/array_utils.mjs';
 import { RECORD_SOURCE } from '../config/constants.mjs';
 import { hasLocalRecord } from '../memory/resolver.mjs';
+import { normalizeDomain } from '../utils/domain_utils.mjs';
+import { store } from '../memory/store.mjs';
 
 const FLUSH_INTERVAL_MS = config.cache.flushInterval;
 const FILTER_IPS = new Set(config.cache.filterIps);
@@ -65,11 +67,83 @@ async function flushCache() {
     return flushPromise;
 }
 
+function promoteToMemory(record, dnsServerId) {
+
+    const domain = normalizeDomain(record.domain);
+
+    if (hasLocalRecord(domain)) {
+        return;
+    }
+
+    let mem = store.exactRecords.get(domain);
+
+    if (!mem) {
+        mem = {
+            id: null,
+            domain,
+            enabled: true,
+            isRegex: false,
+            source: record.source,
+            servers: [],
+            hits: record.hits ?? 1,
+            lastHit: record.lastHit ?? Date.now(),
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        };
+        store.exactRecords.set(domain, mem);
+    } else {
+        if (mem.source === RECORD_SOURCE.LOCAL) {
+            return;
+        }
+        mem.source = record.source;
+        mem.hits = record.hits ?? mem.hits;
+        mem.lastHit = record.lastHit ?? mem.lastHit;
+        mem.updatedAt = Date.now();
+    }
+
+    for (const s of mem.servers) {
+        s.selected = false;
+    }
+
+    let server = mem.servers.find(s => s.dnsServerId === dnsServerId);
+
+    if (!server) {
+        server = {
+            dnsServerId,
+            selected: true,
+            status: record.source === RECORD_SOURCE.FILTERED ? 'FILTERED' : 'SUCCESS',
+            isStale: record.source === RECORD_SOURCE.FILTERED,
+            lastSuccessAt: Date.now(),
+            A: [],
+            AAAA: [],
+            CNAME: []
+        };
+        mem.servers.push(server);
+    } else {
+        server.selected = true;
+        server.status = record.source === RECORD_SOURCE.FILTERED ? 'FILTERED' : 'SUCCESS';
+        server.isStale = record.source === RECORD_SOURCE.FILTERED;
+        server.lastSuccessAt = Date.now();
+    }
+
+    if (record.A?.length) {
+        server.A = record.A.map(a => ({ ...a, name: domain }));
+    }
+    if (record.AAAA?.length) {
+        server.AAAA = record.AAAA.map(a => ({ ...a, name: domain }));
+    }
+    if (record.CNAME?.length) {
+        server.CNAME = record.CNAME.map(c => ({ ...c, name: domain }));
+    }
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                  Public                                    */
 /* -------------------------------------------------------------------------- */
 
 export function cacheRecord(record, dnsServerId = null) {
+
+    record.domain = normalizeDomain(record.domain);
 
     if (hasLocalRecord(record.domain)) {
         return;
@@ -78,7 +152,7 @@ export function cacheRecord(record, dnsServerId = null) {
     const now = Date.now();
 
     const source =
-        [...record.A, ...record.AAAA]
+        [...(record.A ?? []), ...(record.AAAA ?? [])]
             .some(r => FILTER_IPS.has(r.address))
             ? RECORD_SOURCE.FILTERED
             : RECORD_SOURCE.CACHE;
@@ -89,18 +163,14 @@ export function cacheRecord(record, dnsServerId = null) {
     const existing = pendingCache.get(record.domain);
 
     if (existing) {
-
         mergeRecords(existing.A, record.A, 'address');
         mergeRecords(existing.AAAA, record.AAAA, 'address');
         mergeRecords(existing.CNAME, record.CNAME, 'domain');
-
         existing.hits++;
         existing.lastHit = now;
         existing.dnsServerId = dnsServerId;
-
-        // Escalate to FILTERED, or demote back to CACHE when a clean answer arrives.
         existing.source = source;
-
+        promoteToMemory(existing, dnsServerId);
         return;
     }
 
@@ -108,11 +178,8 @@ export function cacheRecord(record, dnsServerId = null) {
     record.hits = 1;
     record.lastHit = now;
 
-    pendingCache.set(
-        record.domain,
-        record
-    );
-
+    pendingCache.set(record.domain, record);
+    promoteToMemory(record, dnsServerId);
 }
 
 export async function flush() {

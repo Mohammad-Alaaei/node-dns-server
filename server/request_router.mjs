@@ -10,6 +10,7 @@ import { handlePtrRequest } from '../records/ptr_record.mjs';
 import { handleOtherRequest } from '../records/other_records.mjs';
 import { DNS_TYPES } from '../config/constants.mjs';
 import { handleCNAMERequest } from '../records/cname_record.mjs';
+import { normalizeDomain } from '../utils/domain_utils.mjs';
 
 const DEBUG_PREFIX = config.server.debugPrefix;
 
@@ -38,6 +39,8 @@ export async function handleRequest(message, remote) {
             debug = true;
             domain = domain.substring(2);
         }
+
+        domain = normalizeDomain(domain);
 
         logger.info(`Requested for: ${domain} (${DNS_TYPES[question.type] ?? question.type})`);
 

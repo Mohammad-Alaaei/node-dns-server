@@ -1,5 +1,6 @@
 import { RECORD_SOURCE } from '../config/constants.mjs';
 import { store } from './store.mjs';
+import { normalizeDomain } from '../utils/domain_utils.mjs';
 
 function isExpired(values) {
     if (!values.length) {
@@ -66,6 +67,7 @@ function isRecordValid(record, type) {
  * Find an exact/regex record that can be served right now.
  */
 export function findRecord(domain, type) {
+    domain = normalizeDomain(domain);
 
     const exact = store.exactRecords.get(domain);
 
@@ -90,6 +92,7 @@ export function findRecord(domain, type) {
  * Skips LOCAL (authoritative, never re-resolved upstream).
  */
 export function findStoredRecord(domain) {
+    domain = normalizeDomain(domain);
 
     const exact = store.exactRecords.get(domain);
 
@@ -110,6 +113,8 @@ export function findStoredRecord(domain) {
 }
 
 export function hasLocalRecord(domain) {
+    domain = normalizeDomain(domain);
+
     const exact = store.exactRecords.get(domain);
 
     if (exact && exact.source === RECORD_SOURCE.LOCAL) {
@@ -171,9 +176,9 @@ export function getPreferredServer(record, type) {
 }
 
 export function findCustomDnsServer(domain) {
+    domain = normalizeDomain(domain);
 
     for (const group of store.customDnsServers) {
-
         const matched = group.isRegex
             ? group.regex.test(domain)
             : group.domain.toLowerCase() === domain.toLowerCase();
