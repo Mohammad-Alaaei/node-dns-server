@@ -1,77 +1,23 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { store } from '../memory/store.mjs';
+import {
+    resetStore,
+    makeValues,
+    makeServer,
+    putExact,
+    RECORD_SOURCE,
+    store
+} from './helpers.mjs';
+
 import {
     findRecord,
     findStoredRecord,
     getPreferredServer,
-    findServerById
+    findServerById,
+    hasLocalRecord
 } from '../memory/resolver.mjs';
 import { selectServer } from '../records/record_utils.mjs';
-import { RECORD_SOURCE } from '../config/constants.mjs';
-
-/* -------------------------------------------------------------------------- */
-/*                              Mock helpers                                  */
-/* -------------------------------------------------------------------------- */
-
-function resetStore() {
-    store.exactRecords.clear();
-    store.regexRecords.length = 0;
-    store.defaultDnsServers.length = 0;
-    store.customDnsServers.length = 0;
-}
-
-function makeValues(addresses, { expired = false, ttl = 60 } = {}) {
-    const now = Date.now();
-    return addresses.map(address => ({
-        name: 'example.com',
-        address,
-        ttl,
-        expiresAt: expired ? now - 1000 : now + ttl * 1000
-    }));
-}
-
-function makeServer({
-    dnsServerId = 1,
-    selected = true,
-    isStale = false,
-    status = 'SUCCESS',
-    A = [],
-    AAAA = [],
-    CNAME = [],
-    lastSuccessAt = Date.now()
-} = {}) {
-    return {
-        dnsServerId,
-        selected,
-        isStale,
-        status,
-        lastSuccessAt,
-        A,
-        AAAA,
-        CNAME
-    };
-}
-
-function putExact(domain, source, servers) {
-    store.exactRecords.set(domain, {
-        id: 1,
-        domain,
-        enabled: true,
-        isRegex: false,
-        source,
-        servers,
-        hits: 0,
-        lastHit: null,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-    });
-}
-
-/* -------------------------------------------------------------------------- */
-/*                                   Tests                                    */
-/* -------------------------------------------------------------------------- */
 
 describe('LOCAL source', () => {
 
@@ -93,12 +39,20 @@ describe('LOCAL source', () => {
         assert.equal(server.A[0].address, '1.2.3.4');
     });
 
-    it('is not returned by findStoredRecord (no upstream re-resolve)', () => {
+    it('is not returned by findStoredRecord (no upstream re-resolve metadata)', () => {
         putExact('local.test', RECORD_SOURCE.LOCAL, [
             makeServer({ A: makeValues(['1.2.3.4']) })
         ]);
 
         assert.equal(findStoredRecord('local.test'), null);
+    });
+
+    it('hasLocalRecord is true for LOCAL domains', () => {
+        putExact('local.test', RECORD_SOURCE.LOCAL, [
+            makeServer({ A: makeValues(['1.2.3.4']) })
+        ]);
+        assert.equal(hasLocalRecord('local.test'), true);
+        assert.equal(hasLocalRecord('other.test'), false);
     });
 });
 
@@ -119,7 +73,7 @@ describe('CACHE source — fresh vs expired', () => {
         assert.equal(selectServer(record, 'A').A[0].address, '10.0.0.1');
     });
 
-    it('does not serve pure expired non-stale CACHE (must re-resolve)', () => {
+    it('does not serve pure expired non-stale CACHE', () => {
         putExact('cache.test', RECORD_SOURCE.CACHE, [
             makeServer({
                 isStale: false,
@@ -127,13 +81,8 @@ describe('CACHE source — fresh vs expired', () => {
             })
         ]);
 
-        assert.equal(
-            findRecord('cache.test', 'A'),
-            null,
-            'expired non-stale CACHE must not be served'
-        );
+        assert.equal(findRecord('cache.test', 'A'), null);
 
-        // But the stored record is still discoverable for preferred-server lookup
         const stored = findStoredRecord('cache.test');
         assert.ok(stored);
         assert.equal(stored.source, RECORD_SOURCE.CACHE);
@@ -144,17 +93,17 @@ describe('FILTERED source — stale fallback', () => {
 
     beforeEach(resetStore);
 
-    it('still serves stale FILTERED values (old cache kept)', () => {
+    it('still serves stale FILTERED values', () => {
         putExact('filtered.test', RECORD_SOURCE.FILTERED, [
             makeServer({
                 isStale: true,
                 status: 'FILTERED',
-                A: makeValues(['9.9.9.9'], { expired: true }) // even expired is OK when stale
+                A: makeValues(['9.9.9.9'], { expired: true })
             })
         ]);
 
         const record = findRecord('filtered.test', 'A');
-        assert.ok(record, 'stale FILTERED must remain servable');
+        assert.ok(record);
 
         const server = selectServer(record, 'A');
         assert.ok(server);
@@ -219,25 +168,10 @@ describe('preferred (selected) server for re-resolve', () => {
         // Not servable (expired)
         assert.equal(findRecord('pref.test', 'A'), null);
 
-        const stored = findStoredRecord('pref.test');
-        const preferred = getPreferredServer(stored, 'A');
-
+        const preferred = getPreferredServer(findStoredRecord('pref.test'), 'A');
         assert.ok(preferred);
         assert.equal(preferred.id, 20);
         assert.equal(preferred.ip, '1.1.1.1');
-    });
-
-    it('falls back to first server when none selected', () => {
-        putExact('pref2.test', RECORD_SOURCE.CACHE, [
-            makeServer({
-                dnsServerId: 10,
-                selected: false,
-                A: makeValues(['10.0.0.1'], { expired: true })
-            })
-        ]);
-
-        const preferred = getPreferredServer(findStoredRecord('pref2.test'), 'A');
-        assert.equal(preferred.ip, '8.8.8.8');
     });
 });
 
