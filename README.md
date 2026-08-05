@@ -1,63 +1,103 @@
 # What is this?
 
-this is a simple dns server made on nodejs.
-you can define your custom ip addresses for domains or you can manage domains to resolve by custom dns servers.
+This is a simple DNS server made with Node.js.
 
-## Installation
+It allows you to define custom IP addresses for domains, manage domains resolved through custom DNS servers, and cache DNS records.
 
-### 1- install NodeJS
+The application uses MySQL as its database and Sequelize as its ORM.
 
-### 2- install required package and dependencies
+## Quick Setup
+
+### 1. Install Node.js
+
+Install Node.js on your system.
+
+### 2. Install dependencies
 
 ```cmd
 npm install
 ```
 
-### 3- [optional] if you want to route domains to your custom static ip addresses
+### 3. Setup MySQL
 
-create a text file (.txt) and rename it to 'domains' (domains.txt) in format like this:
+Install and configure a MySQL server on your system.
 
-```txt
-sub\.example\.com 1.2.3.4 5.6.7.8
-example\.com 1.2.3.4 5.6.7.8
-```
+Create a database user and make sure it has the required permissions to create and manage the application database.
 
-each domain should write in new line.
-first part is domain address in regex format.
-after that you can write ip addresses for that domain separated with space.
+### 4. Configure the environment
 
-### 4- [optional] if you want to manage domains to resolve with custom dns servers
+Update the `.env` file with your MySQL connection details.
 
-create a text file (.txt) and rename it to your prefered dns server ip address. for example:
+Make sure the database host, port, username, password, and database settings are correct.
 
-```txt
-8.8.8.8.txt
-```
+In particular, check the database username and password. If you are using the MySQL `root` user, make sure the `root` credentials in `.env` are correct.
 
-inside this file, write each domain in new line and with regex format. for example:
+### 5. Initialize the database
 
-```txt
-example\.com
-.*\.example\.com
-```
-
-### 5- run server
-
-#### in windows
-
-just execute 'run.bat' file
-or
-open a command-prompt (cmd), change directory to where this server files are in and run 'main.mjs':
+Run the following commands:
 
 ```cmd
-cd YOUR/SERVER/DIRECTORY
-node main.mjs
+npm run db:create
+npm run db:migrate
+npm run db:seed
 ```
 
-##### in linux
+These commands create the database, apply the database migrations, and add the default seed data.
 
-just go to where is server files located in and run 'main.mjs':
+### 6. Run the server
+
+#### Windows
 
 ```cmd
 node main.mjs
 ```
+
+Or execute:
+
+```cmd
+run.bat
+```
+
+#### Linux
+
+```cmd
+node main.mjs
+```
+
+## Configuration
+
+Application configuration is managed through environment variables.
+
+Create or update your `.env` file according to the available configuration options in `.env.example`.
+
+## Domain Management
+
+DNS records are now managed through the database instead of the previous `domains.txt` and custom DNS server `.txt` files.
+
+Records can be configured with their domain, IP addresses, source, and enabled state.
+
+The application supports different record sources, including:
+
+- `LOCAL` for manually configured records.
+- `CACHE` for records resolved and stored by the DNS server.
+- `FILTERED` for filtered records.
+
+## DNS Resolution
+
+When a requested domain does not have an applicable local record, the server can resolve it through the configured DNS servers.
+
+Resolved records are stored in the database and can be served from the cache until they expire.
+
+The server also supports CNAME records.
+
+## Requirements
+
+- Node.js
+- MySQL
+- npm
+
+## Running the Server
+
+The DNS server listens on the configured IP address and port.
+
+Make sure the configured port is available and that the application has the required permissions to use it.
