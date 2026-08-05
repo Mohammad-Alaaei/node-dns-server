@@ -2,11 +2,13 @@
   "name": "simple_dns_server",
   "version": "3.0.0",
   "main": "main.mjs",
+  "type": "module",
   "scripts": {
     "start": "node main.mjs",
     "test": "node --test tests/**/*.test.mjs",
     "test:unit": "node --test tests/source-state.test.mjs tests/local-isolation.test.mjs tests/cache-level.test.mjs",
     "test:integration": "node --test tests/repository.integration.test.mjs",
+    "test:cache": "node --test tests/cache-level.test.mjs",
     "db:create": "node scripts/create-db.mjs",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
@@ -17,7 +19,7 @@
   },
   "author": "Mohammad V. Alaaei (MVA)",
   "license": "GPL-3.0-only",
-  "description": "",
+  "description": "Custom DNS server that receives DNS requests and decides what to do with them",
   "dependencies": {
     "dns2": "^3.0.0",
     "dotenv": "^17.4.2",

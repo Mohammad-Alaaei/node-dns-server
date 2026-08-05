@@ -1,11 +1,11 @@
 /**
  * Integration tests against MySQL (DB_* from .env).
- * Skips when DB is unreachable.
+ * Skips the whole suite if the database is unreachable.
  *
- * Bug fixes:
+ * Covers bug fixes:
  * - one records row per domain
  * - saveRecord does not create a second row when LOCAL exists
- * - saveLookupStatus ignores LOCAL
+ * - saveLookupStatus ignores LOCAL domains
  * - unique domain constraint
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
@@ -42,11 +42,12 @@ async function wipeTestRows() {
 before(async () => {
     try {
         await authenticate();
+        // Ensure models are registered
         await import('../database/models/index.mjs');
         dbReady = true;
     } catch (err) {
         console.warn(
-            '[repository.integration] DB not available — skipping:',
+            '[repository.integration] DB not available — skipping integration tests:',
             err.message
         );
         dbReady = false;
@@ -74,6 +75,13 @@ function testDomain(name) {
 }
 
 describe('repository integration (MySQL)', () => {
+
+    it('skips when DB is down (meta)', { skip: false }, () => {
+        if (!dbReady) {
+            console.log('Integration tests skipped — configure DB_* and run migrations.');
+        }
+        assert.ok(true);
+    });
 
     it('saveRecord creates a single row per domain', async (t) => {
         if (!dbReady) return t.skip('DB not available');

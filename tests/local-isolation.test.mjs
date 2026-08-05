@@ -1,9 +1,9 @@
 /**
  * Bug-fix coverage:
- * 1) LOCAL + type present → findRecord hits
- * 2) LOCAL + type missing → findRecord null, hasLocalRecord true
- * 3) Regex LOCAL works (no variants map)
- * 4) One domain slot — LOCAL preferred
+ * 1) LOCAL domain with type present → never treated as missing (no upstream path via findRecord null)
+ * 2) LOCAL domain with type missing → findRecord null, but hasLocalRecord true
+ * 3) Regex LOCAL works (no broken variants path)
+ * 4) One domain slot in memory — LOCAL preferred
  */
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -52,10 +52,11 @@ describe('LOCAL isolation — type present vs missing', () => {
 
         assert.equal(findRecord('static.example', 'AAAA'), null);
         assert.equal(hasLocalRecord('static.example'), true);
+        // Must not be treated as CACHE for re-resolve preference
         assert.equal(findStoredRecord('static.example'), null);
     });
 
-    it('LOCAL with CNAME is valid for A request', () => {
+    it('LOCAL with CNAME is valid for A request (CNAME counts as answer path)', () => {
         putExact('alias.example', RECORD_SOURCE.LOCAL, [
             makeServer({
                 A: [],
@@ -103,6 +104,7 @@ describe('One domain in memory — LOCAL wins', () => {
             makeServer({ A: makeValues(['1.1.1.1']) })
         ]);
 
+        // Simulate loadRecords preferring LOCAL (overwrite source on same key)
         const existing = store.exactRecords.get('dup.example');
         existing.source = RECORD_SOURCE.LOCAL;
         existing.servers = [
@@ -111,10 +113,7 @@ describe('One domain in memory — LOCAL wins', () => {
 
         assert.equal(store.exactRecords.size, 1);
         assert.equal(findRecord('dup.example', 'A').source, RECORD_SOURCE.LOCAL);
-        assert.equal(
-            selectServer(findRecord('dup.example', 'A'), 'A').A[0].address,
-            '9.9.9.9'
-        );
+        assert.equal(selectServer(findRecord('dup.example', 'A'), 'A').A[0].address, '9.9.9.9');
     });
 });
 

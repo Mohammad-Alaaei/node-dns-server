@@ -26,6 +26,7 @@ if (!MYSQL_ROOT_USER || !MYSQL_ROOT_PASSWORD) {
 const templatePath = path.join(root, 'data', 'create-db.sql');
 let sql = fs.readFileSync(templatePath, 'utf8');
 
+// Strip SQL comments for cleaner execution logs (optional keep)
 sql = sql
     .replaceAll('${DB_NAME}', DB_NAME.replace(/`/g, ''))
     .replaceAll('${DB_USER}', DB_USER.replace(/'/g, "\\'"))

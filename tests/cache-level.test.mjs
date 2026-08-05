@@ -17,7 +17,7 @@ import {
 } from '../services/cache_policy.mjs';
 import { evaluateUpstreamHandling } from '../services/response_parser.mjs';
 
-// dns2 Packet.TYPE values (avoid hard dependency shape in tests)
+// dns2 Packet.TYPE values (avoid importing dns2 in tests)
 const TYPE_A = 1;
 const TYPE_AAAA = 28;
 const TYPE_CNAME = 5;
@@ -262,6 +262,7 @@ describe('evaluateUpstreamHandling — NONE', () => {
 describe('CACHE_LEVEL full matrix (process)', () => {
 
     const cases = [
+        // level, isCustom, isFiltered, expectedProcess
         [CACHE_LEVELS.ALL, true, false, true],
         [CACHE_LEVELS.ALL, false, false, true],
         [CACHE_LEVELS.ALL, true, true, true],

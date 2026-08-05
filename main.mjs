@@ -39,8 +39,11 @@ async function main() {
         return b.domain.length - a.domain.length;
     });
 
+    // Always init logger (errors / app messages). Upstream answer lines
+    // are gated by CACHE_LEVEL inside response_parser.
     await logger.init();
 
+    // Cache flusher only when some level may write records
     if (CACHE_LEVEL !== CACHE_LEVELS.NONE) {
         await cacheService.init();
     }

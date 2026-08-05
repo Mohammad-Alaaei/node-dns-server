@@ -3,7 +3,7 @@ import { config } from '../config/config.mjs';
 
 import { loadRecords, saveRecord } from '../database/repository.mjs';
 import { mergeRecords } from '../utils/array_utils.mjs';
-import { RECORD_SOURCE } from '../config/constants.mjs';
+import { RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
 import { hasLocalRecord } from '../memory/resolver.mjs';
 import { normalizeDomain } from '../utils/domain_utils.mjs';
 import { store } from '../memory/store.mjs';
@@ -56,6 +56,7 @@ async function flushCache() {
                 pendingCache.set(record.domain, record);
             }
         } finally {
+            // Reload from DB — promoteToMemory already serves until this completes
             await loadRecords();
 
             flushing = false;
@@ -67,6 +68,11 @@ async function flushCache() {
     return flushPromise;
 }
 
+/**
+ * Push a cached answer into the in-memory store immediately so the next
+ * request can be served by findRecord without waiting for DB flush.
+ * This is required for rapid repeated queries (custom or default upstream).
+ */
 function promoteToMemory(record, dnsServerId) {
 
     const domain = normalizeDomain(record.domain);
@@ -111,7 +117,9 @@ function promoteToMemory(record, dnsServerId) {
         server = {
             dnsServerId,
             selected: true,
-            status: record.source === RECORD_SOURCE.FILTERED ? 'FILTERED' : 'SUCCESS',
+            status: record.source === RECORD_SOURCE.FILTERED
+                ? RECORD_STATUS.FILTERED
+                : RECORD_STATUS.SUCCESS,
             isStale: record.source === RECORD_SOURCE.FILTERED,
             lastSuccessAt: Date.now(),
             A: [],
@@ -121,7 +129,9 @@ function promoteToMemory(record, dnsServerId) {
         mem.servers.push(server);
     } else {
         server.selected = true;
-        server.status = record.source === RECORD_SOURCE.FILTERED ? 'FILTERED' : 'SUCCESS';
+        server.status = record.source === RECORD_SOURCE.FILTERED
+            ? RECORD_STATUS.FILTERED
+            : RECORD_STATUS.SUCCESS;
         server.isStale = record.source === RECORD_SOURCE.FILTERED;
         server.lastSuccessAt = Date.now();
     }
@@ -170,6 +180,8 @@ export function cacheRecord(record, dnsServerId = null) {
         existing.lastHit = now;
         existing.dnsServerId = dnsServerId;
         existing.source = source;
+
+        // Immediate reuse for the next query (before DB flush)
         promoteToMemory(existing, dnsServerId);
         return;
     }
@@ -179,6 +191,8 @@ export function cacheRecord(record, dnsServerId = null) {
     record.lastHit = now;
 
     pendingCache.set(record.domain, record);
+
+    // Immediate reuse for the next query (before DB flush)
     promoteToMemory(record, dnsServerId);
 }
 

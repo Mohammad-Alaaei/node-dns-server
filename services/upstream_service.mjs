@@ -1,17 +1,18 @@
 import * as logger from '../utils/logger.mjs';
-import { decorateDebugResponse } from "../server/response_builder.mjs";
-import { handleUpstreamResponse } from "./response_parser.mjs";
-import { forwardToExternalDns } from "./upstream_resolver.mjs";
-import { selectUpstream } from "./upstream_selector.mjs";
+import { decorateDebugResponse } from '../server/response_builder.mjs';
+import { handleUpstreamResponse } from './response_parser.mjs';
+import { forwardToExternalDns } from './upstream_resolver.mjs';
+import { selectUpstream } from './upstream_selector.mjs';
 
 export async function handleExternalRequests(
     request,
     message,
     domain,
     type = null,
-    debug = false
+    debug = false,
+    preferredServer = null
 ) {
-    const upstream = selectUpstream(domain);
+    const upstream = selectUpstream(domain, preferredServer);
 
     logger.info(
         `Forwarding ${type ?? 'query'} for ${domain} to ${upstream.server.ip}`
@@ -34,6 +35,7 @@ export async function handleExternalRequests(
         upstream.server
     );
 
+    // isCustom drives CUSTOM_ONLY; FILTERED_ONLY decided inside after seeing answers
     await handleUpstreamResponse(
         response.packet,
         upstream.custom,

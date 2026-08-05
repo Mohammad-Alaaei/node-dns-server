@@ -1,5 +1,12 @@
 import { Packet } from 'dns2';
 
+/**
+ * ALL           → log + cache every upstream answer
+ * CUSTOM_ONLY   → log + cache only answers from a custom upstream
+ * FILTERED_ONLY → log + cache only answers that contain a FILTER_IPS address
+ * NONE          → no upstream answer logging, no caching
+ *                 (errors / app logs still work)
+ */
 export const CACHE_LEVELS = {
     ALL: 'ALL',
     CUSTOM_ONLY: 'CUSTOM_ONLY',

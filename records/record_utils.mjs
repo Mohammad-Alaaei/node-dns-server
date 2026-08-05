@@ -56,7 +56,7 @@ export function selectServer(record, type) {
 }
 
 /**
- * Handles record types stored locally.
+ * Handles record types stored in DB / memory.
  */
 export async function handleLocalRecord({
     request,
@@ -91,16 +91,13 @@ export async function handleLocalRecord({
                         case Packet.TYPE.A:
                         case Packet.TYPE.AAAA:
                             return answer.address;
-                            break;
 
                         case Packet.TYPE.CNAME:
                         case Packet.TYPE.PTR:
                             return answer.domain;
-                            break;
 
                         case Packet.TYPE.MX:
                             return answer.exchange;
-                            break;
 
                         default:
                             return null;
@@ -118,10 +115,13 @@ export async function handleLocalRecord({
             return { packet, buffer: null };
         }
 
+        // LOCAL exists but this type is missing — only then allow upstream.
+        // Do not re-resolve LOCAL when type is present but empty answer path failed.
         if (record.source === RECORD_SOURCE.LOCAL) {
             logger.info(`LOCAL ${domain} has no ${type}; forwarding upstream`);
         }
     } else if (hasLocalRecord(domain)) {
+        // LOCAL row exists but isRecordValid failed for this type → upstream for missing type only
         logger.info(`LOCAL ${domain} missing type ${type}; forwarding upstream`);
     }
 

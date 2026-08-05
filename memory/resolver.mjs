@@ -16,12 +16,9 @@ function isExpired(values) {
 }
 
 /**
- * A record is servable when:
- * - LOCAL and has values, or
- * - has non-expired non-stale values, or
- * - has stale values (FILTERED fallback — still serve old payload).
- *
- * Purely expired non-stale CACHE is NOT servable → triggers re-resolve.
+ * LOCAL: valid when requested type or CNAME exists (never expires).
+ * CACHE/FILTERED: valid when non-expired non-stale values exist,
+ * or stale values exist (FILTERED fallback).
  */
 function isRecordValid(record, type) {
 
@@ -47,6 +44,7 @@ function isRecordValid(record, type) {
             continue;
         }
 
+        // Stale FILTERED — still servable
         if (server.isStale) {
             return true;
         }
@@ -64,7 +62,8 @@ function isRecordValid(record, type) {
 }
 
 /**
- * Find an exact/regex record that can be served right now.
+ * Find a servable record for domain + type.
+ * Exact match first, then regex (longer patterns preferred via load sort).
  */
 export function findRecord(domain, type) {
     domain = normalizeDomain(domain);
@@ -80,6 +79,7 @@ export function findRecord(domain, type) {
             record.regex.test(domain) &&
             isRecordValid(record, type)
         ) {
+            // Same shape as exact — selectServer picks among servers
             return record;
         }
     }
@@ -88,8 +88,7 @@ export function findRecord(domain, type) {
 }
 
 /**
- * Find a stored record even if expired (for preferred-server re-resolve).
- * Skips LOCAL (authoritative, never re-resolved upstream).
+ * Find stored non-LOCAL record even if expired (preferred-server re-resolve).
  */
 export function findStoredRecord(domain) {
     domain = normalizeDomain(domain);
@@ -112,6 +111,9 @@ export function findStoredRecord(domain) {
     return null;
 }
 
+/**
+ * True if domain has a LOCAL record in memory (any type).
+ */
 export function hasLocalRecord(domain) {
     domain = normalizeDomain(domain);
 
@@ -181,7 +183,7 @@ export function findCustomDnsServer(domain) {
     for (const group of store.customDnsServers) {
         const matched = group.isRegex
             ? group.regex.test(domain)
-            : group.domain.toLowerCase() === domain.toLowerCase();
+            : normalizeDomain(group.domain) === domain;
 
         if (matched) {
             return group.servers[0];
@@ -199,7 +201,9 @@ export function getDefaultDnsServer() {
         throw new Error('No default DNS server configured.');
     }
 
-    return store.defaultDnsServers[
+    const server = store.defaultDnsServers[
         defaultIndex++ % store.defaultDnsServers.length
     ];
+
+    return server;
 }

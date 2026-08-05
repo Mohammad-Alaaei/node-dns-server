@@ -34,6 +34,7 @@ export async function loadRecords() {
     store.exactRecords.clear();
     store.regexRecords.length = 0;
 
+    // Prefer LOCAL when ordering so ensureMemoryRecord keeps LOCAL source
     const rows = await Record.findAll({
         where: {
             [Op.or]: [
@@ -57,6 +58,7 @@ export async function loadRecords() {
             }
         ],
         order: [
+            // LOCAL first so it wins the in-memory map slot for a domain
             [sequelize.literal(`CASE WHEN source = '${RECORD_SOURCE.LOCAL}' THEN 0 ELSE 1 END`), 'ASC'],
             ['is_regex', 'ASC'],
             [sequelize.fn('LENGTH', sequelize.col('records.domain')), 'DESC'],
@@ -150,7 +152,20 @@ function ensureMemoryRecord(row) {
             record = createRecord(row);
             record.regex = new RegExp(`^(?:${row.domain})$`, 'i');
             collection.push(record);
+            return record;
         }
+
+        // Prefer LOCAL if a later row is LOCAL (should be rare with unique domain)
+        if (
+            row.source === RECORD_SOURCE.LOCAL &&
+            record.source !== RECORD_SOURCE.LOCAL
+        ) {
+            record.id = row.id;
+            record.source = RECORD_SOURCE.LOCAL;
+            record.enabled = !!row.enabled;
+            record.isRegex = !!row.is_regex;
+        }
+
         return record;
     }
 
@@ -158,7 +173,19 @@ function ensureMemoryRecord(row) {
     if (!record) {
         record = createRecord(row);
         collection.set(row.domain, record);
+        return record;
     }
+
+    if (
+        row.source === RECORD_SOURCE.LOCAL &&
+        record.source !== RECORD_SOURCE.LOCAL
+    ) {
+        record.id = row.id;
+        record.source = RECORD_SOURCE.LOCAL;
+        record.enabled = !!row.enabled;
+        record.isRegex = !!row.is_regex;
+    }
+
     return record;
 }
 
@@ -182,8 +209,10 @@ function createRecord(row) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Lookup / create by (domain, source).
- * Cache paths never attach to a LOCAL row.
+ * One row per domain.
+ * - Lookup by domain only
+ * - Never change source away from LOCAL
+ * - Cache paths do not create a second row
  */
 async function ensureRecord(record) {
     const now = Date.now();
@@ -200,15 +229,25 @@ async function ensureRecord(record) {
             updated_at: now
         };
 
+        // Never overwrite LOCAL with CACHE/FILTERED
         if (existing.source !== RECORD_SOURCE.LOCAL) {
             updates.enabled = record.enabled ?? true;
             updates.is_regex = !!record.isRegex;
+
+            // Allow CACHE <-> FILTERED updates only when not LOCAL
+            if (
+                requestedSource === RECORD_SOURCE.CACHE ||
+                requestedSource === RECORD_SOURCE.FILTERED
+            ) {
+                // source is finalized by updateRecordSource after values write
+            }
         }
 
         await existing.update(updates);
         return existing.id;
     }
 
+    // New domain — use requested source (CACHE/FILTERED/LOCAL)
     const created = await Record.create({
         domain: record.domain,
         enabled: record.enabled ?? true,
@@ -361,6 +400,7 @@ async function updateRecordSource(recordId) {
 }
 
 export async function saveRecord(record) {
+    // Refuse to cache-write when a LOCAL row already exists for this domain
     const existing = await Record.findOne({
         where: { domain: record.domain }
     });
@@ -434,6 +474,7 @@ export async function disableLocalRecord(domain) {
 export async function saveLookupStatus(domain, dnsServerId, type, status) {
     const existing = await Record.findOne({ where: { domain } });
 
+    // Do not attach lookup noise to LOCAL domains
     if (existing?.source === RECORD_SOURCE.LOCAL) {
         return;
     }

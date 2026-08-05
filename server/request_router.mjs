@@ -37,7 +37,7 @@ export async function handleRequest(message, remote) {
 
         if (domain.startsWith(DEBUG_PREFIX)) {
             debug = true;
-            domain = domain.substring(2);
+            domain = domain.substring(DEBUG_PREFIX.length);
         }
 
         domain = normalizeDomain(domain);

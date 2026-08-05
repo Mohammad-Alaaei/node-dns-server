@@ -42,6 +42,9 @@ function packetHasFilterIp(packet) {
     return false;
 }
 
+/**
+ * IGNORE_IPS only suppresses the log queue; does not affect caching.
+ */
 function packetHasIgnoreIp(packet) {
     const ignoreIps = new Set(config.ignoreIps);
     if (ignoreIps.size === 0) {
@@ -62,7 +65,11 @@ function packetHasIgnoreIp(packet) {
 }
 
 /**
- * Pure decision helper (tests + handleUpstreamResponse).
+ * Pure decision helper (used by tests + handleUpstreamResponse).
+ *
+ * @param {object} packet
+ * @param {boolean} isCustom
+ * @returns {{ isFiltered: boolean, process: boolean, doLog: boolean }}
  */
 export function evaluateUpstreamHandling(packet, isCustom = false) {
     const isFiltered = packetHasFilterIp(packet);
@@ -71,7 +78,19 @@ export function evaluateUpstreamHandling(packet, isCustom = false) {
     return { isFiltered, process, doLog };
 }
 
-function handleUpstreamResponse(packet, isCustom = false, dnsServerId = null) {
+/**
+ * Process upstream answers under CACHE_LEVEL policy.
+ *
+ * @param {object} packet
+ * @param {boolean} isCustom  resolved via a custom upstream rule
+ * @param {number|null} dnsServerId
+ */
+function handleUpstreamResponse(
+    packet,
+    isCustom = false,
+    dnsServerId = null
+) {
+
     if (!packet?.answers?.length) {
         return;
     }

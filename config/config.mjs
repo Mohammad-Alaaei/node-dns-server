@@ -24,12 +24,24 @@ export const config = {
     },
 
     cache: {
+        /**
+         * Controls BOTH upstream-answer logging and caching.
+         * See CACHE_LEVELS in constants.mjs.
+         */
         level: process.env.CACHE_LEVEL ?? CACHE_LEVELS.CUSTOM_ONLY,
         expireTime: Number(process.env.CACHE_EXPIRE_TIME ?? 60),
         flushInterval: Number(process.env.FLUSH_INTERVAL_MS ?? 60000),
+        /**
+         * IPs that classify an answer as FILTERED.
+         * Required for FILTERED_ONLY level; also marks source=FILTERED when caching.
+         */
         filterIps: parseIpList(process.env.FILTER_IPS)
     },
 
+    /**
+     * Extra log suppress list: even when CACHE_LEVEL would log an upstream
+     * answer, matching A/AAAA addresses skip the log queue only (cache unchanged).
+     */
     ignoreIps: parseIpList(process.env.IGNORE_IPS),
 
     db: {
@@ -41,8 +53,8 @@ export const config = {
         pool: {
             max: Number(process.env.DB_POOL_MAX ?? 10),
             min: Number(process.env.DB_POOL_MIN ?? 0),
-            acquire: Number(process.env.DB_POOL_ACQUIRE ?? 30000),
-            idle: Number(process.env.DB_POOL_IDLE ?? 10000)
+            acquire: Number(process.env.DB_POOL_ACQUIRE || 30000),
+            idle: Number(process.env.DB_POOL_IDLE || 10000)
         },
         logging: process.env.DB_LOGGING === 'true'
     }

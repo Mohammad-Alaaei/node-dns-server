@@ -2,8 +2,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 const LOG_DIR = process.env.LOG_DIR ?? './logs';
-const FLUSH_INTERVAL = process.env.FLUSH_INTERVAL ?? 5000;     // 5 seconds
-const MAX_BUFFER_SIZE = process.env.MAX_BUFFER_SIZE ?? 100;     // Flush immediately after 100 lines
+const FLUSH_INTERVAL = process.env.LOG_FLUSH_INTERVAL ?? 5000;     // 5 seconds
+const MAX_BUFFER_SIZE = process.env.LOG_MAX_BUFFER_SIZE ?? 100;     // Flush immediately after 100 lines
 
 let sessionLogFile = '';
 let logBuffer = [];
