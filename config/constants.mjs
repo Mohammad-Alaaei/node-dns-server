@@ -1,4 +1,4 @@
-import { Packet } from "dns2";
+import { Packet } from 'dns2';
 
 export const CACHE_LEVELS = {
     ALL: 'ALL',
@@ -27,4 +27,4 @@ export const RECORD_SOURCE = {
     LOCAL: 'LOCAL',
     CACHE: 'CACHE',
     FILTERED: 'FILTERED'
-}
+};

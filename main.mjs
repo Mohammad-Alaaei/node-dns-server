@@ -42,10 +42,7 @@ async function main() {
     await logger.init();
 
     if (CACHE_LEVEL !== CACHE_LEVELS.NONE) {
-        await cacheService.init(CACHE_LEVEL === CACHE_LEVELS.CUSTOM_ONLY
-            ? CACHE_LEVELS.ALL
-            : CACHE_LEVEL
-        );
+        await cacheService.init();
     }
 
     await startServer(SERVER_IP, SERVER_PORT);

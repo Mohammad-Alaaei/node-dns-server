@@ -1,6 +1,13 @@
 import 'dotenv/config';
 import { CACHE_LEVELS } from './constants.mjs';
 
+function parseIpList(value) {
+    return (value ?? '')
+        .split(/[\s,]+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+}
+
 export const config = {
 
     server: {
@@ -20,10 +27,10 @@ export const config = {
         level: process.env.CACHE_LEVEL ?? CACHE_LEVELS.CUSTOM_ONLY,
         expireTime: Number(process.env.CACHE_EXPIRE_TIME ?? 60),
         flushInterval: Number(process.env.FLUSH_INTERVAL_MS ?? 60000),
-        filterIps: (process.env.FILTER_IPS ?? '')
-            .split(/\s+/)
-            .filter(Boolean)
+        filterIps: parseIpList(process.env.FILTER_IPS)
     },
+
+    ignoreIps: parseIpList(process.env.IGNORE_IPS),
 
     db: {
         host: process.env.DB_HOST ?? '127.0.0.1',
