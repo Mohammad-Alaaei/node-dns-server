@@ -42,6 +42,28 @@ function tokenPairResponse(user, accessToken, refresh) {
 }
 
 /**
+ * Decrypt RSA-OAEP password ciphertext from the client.
+ * Returns { password } or { error, status } for the caller to send.
+ */
+function resolveEncryptedPassword(encryptedPassword) {
+    if (!encryptedPassword || typeof encryptedPassword !== 'string') {
+        return {
+            error: 'password required (get ciphertext from /api/auth/public-key)',
+            status: 400
+        };
+    }
+
+    try {
+        return { password: decryptPassword(encryptedPassword) };
+    } catch {
+        return {
+            error: 'Invalid encrypted password — fetch /api/auth/public-key and encrypt',
+            status: 400
+        };
+    }
+}
+
+/**
  * GET /api/auth/public-key
  */
 router.get('/public-key', (_req, res) => {
@@ -61,17 +83,13 @@ router.post('/login', async (req, res, next) => {
     try {
         const { username, password: encryptedPassword } = req.body ?? {};
 
-        if (!username || !encryptedPassword) {
+        if (!username) {
             return res.status(400).json({ error: 'username and password required' });
         }
 
-        let password;
-        try {
-            password = decryptPassword(encryptedPassword);
-        } catch {
-            return res.status(400).json({
-                error: 'Invalid encrypted password — fetch /api/auth/public-key and encrypt with RSA-OAEP SHA-256'
-            });
+        const resolved = resolveEncryptedPassword(encryptedPassword);
+        if (resolved.error) {
+            return res.status(resolved.status).json({ error: resolved.error });
         }
 
         const user = await User.findOne({ where: { username } });
@@ -80,7 +98,7 @@ router.post('/login', async (req, res, next) => {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        const ok = await verifyPassword(password, user.password_hash);
+        const ok = await verifyPassword(resolved.password, user.password_hash);
 
         if (!ok) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -165,13 +183,21 @@ router.get('/me', authenticate, (req, res) => {
 /**
  * POST /api/auth/users
  * superadmin only
+ * Body: { username, password, role? }
+ * `password` MUST be base64 RSA-OAEP ciphertext (same as login).
+ * Server decrypts → bcrypt hash → store (plaintext never written to DB).
  */
 router.post('/users', authenticate, requireRole('superadmin'), async (req, res, next) => {
     try {
-        const { username, password, role = 'viewer' } = req.body ?? {};
+        const { username, password: encryptedPassword, role = 'viewer' } = req.body ?? {};
 
-        if (!username || !password) {
+        if (!username) {
             return res.status(400).json({ error: 'username and password required' });
+        }
+
+        const resolved = resolveEncryptedPassword(encryptedPassword);
+        if (resolved.error) {
+            return res.status(resolved.status).json({ error: resolved.error });
         }
 
         const allowed = ['superadmin', 'admin', 'viewer'];
@@ -185,7 +211,7 @@ router.post('/users', authenticate, requireRole('superadmin'), async (req, res, 
         }
 
         const now = Date.now();
-        const password_hash = await hashPassword(password);
+        const password_hash = await hashPassword(resolved.password);
 
         const user = await User.create({
             username,
