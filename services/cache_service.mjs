@@ -200,6 +200,24 @@ export async function flush() {
     await flushCache();
 }
 
+/**
+ * Snapshot of records waiting for DB flush (for API / debug).
+ * Returns plain objects — safe to JSON-serialize.
+ */
+export function getPendingCache() {
+    return [...pendingCache.values()].map(r => ({
+        domain: r.domain,
+        source: r.source,
+        isRegex: r.isRegex,
+        hits: r.hits,
+        lastHit: r.lastHit,
+        dnsServerId: r.dnsServerId ?? null,
+        A: r.A ?? [],
+        AAAA: r.AAAA ?? [],
+        CNAME: r.CNAME ?? []
+    }));
+}
+
 export async function init() {
 
     flushTimer = setInterval(() => {

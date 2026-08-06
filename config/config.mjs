@@ -57,6 +57,35 @@ export const config = {
             idle: Number(process.env.DB_POOL_IDLE || 10000)
         },
         logging: process.env.DB_LOGGING === 'true'
+    },
+
+    api: {
+        enabled: process.env.API_ENABLED !== 'false',
+        host: process.env.API_HOST ?? '127.0.0.1',
+        port: Number(process.env.API_PORT ?? 3000),
+        jwtSecret: process.env.API_JWT_SECRET ?? 'change-me-in-production',
+        /** Short-lived access token only (no refresh tokens). */
+        jwtExpiresIn: process.env.API_JWT_EXPIRES_IN ?? '5m',
+        /**
+         * Optional persistent RSA PEMs for login password encryption.
+         * If unset, a fresh 2048-bit pair is generated each process start
+         * (clients must re-fetch /api/auth/public-key after restart).
+         */
+        rsaPublicKey: process.env.API_RSA_PUBLIC_KEY
+            ? process.env.API_RSA_PUBLIC_KEY.replace(/\\n/g, '\n')
+            : null,
+        rsaPrivateKey: process.env.API_RSA_PRIVATE_KEY
+            ? process.env.API_RSA_PRIVATE_KEY.replace(/\\n/g, '\n')
+            : null
+    },
+
+    /**
+     * Bootstrap superadmin — created on API start if no users exist.
+     * Set ADMIN_USERNAME + ADMIN_PASSWORD in .env (no registration endpoint).
+     */
+    admin: {
+        username: process.env.ADMIN_USERNAME ?? 'admin',
+        password: process.env.ADMIN_PASSWORD ?? ''
     }
 
 };

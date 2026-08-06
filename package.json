@@ -21,8 +21,11 @@
   "license": "GPL-3.0-only",
   "description": "Custom DNS server that receives DNS requests and decides what to do with them",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "dns2": "^3.0.0",
     "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.23.2",
     "sequelize": "^6.37.8"
   },

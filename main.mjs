@@ -7,37 +7,22 @@ import * as logger from './utils/logger.mjs';
 import * as cacheService from './services/cache_service.mjs';
 
 import { startServer } from './server/dns_server.mjs';
+import { startApi, stopApi } from './server/api/index.mjs';
 import { store } from './memory/store.mjs';
 import { CACHE_LEVELS } from './config/constants.mjs';
-// import { importDomains } from './database/import_domains.mjs';
-// import { importCustomDnsServers } from './database/import_custom_dns.mjs';
-
-/* -------------------------------------------------------------------------- */
-/*                                  Constants                                 */
-/* -------------------------------------------------------------------------- */
 
 const CACHE_LEVEL = config.cache.level;
 
 const SERVER_IP = config.server.ip;
 const SERVER_PORT = config.server.port;
 
-/* -------------------------------------------------------------------------- */
-/*                                   Main                                     */
-/* -------------------------------------------------------------------------- */
-
 async function main() {
     await createSchema();
-
-    // await importDomains();
-    // await importCustomDnsServers();
 
     await loadRecords();
     await loadDnsServers();
 
-
-    store.regexRecords.sort((a, b) => {
-        return b.domain.length - a.domain.length;
-    });
+    store.regexRecords.sort((a, b) => b.domain.length - a.domain.length);
 
     // Always init logger (errors / app messages). Upstream answer lines
     // are gated by CACHE_LEVEL inside response_parser.
@@ -48,8 +33,30 @@ async function main() {
         await cacheService.init();
     }
 
+    await startApi();
     await startServer(SERVER_IP, SERVER_PORT);
 }
+
+async function shutdown(signal) {
+    logger.info(`Shutting down (${signal})…`);
+    try {
+        await stopApi();
+
+        if (CACHE_LEVEL !== CACHE_LEVELS.NONE) {
+            await cacheService.shutdown();
+        }
+
+        await logger.shutdown();
+    } catch (err) {
+        logger.error(err);
+    }
+
+    console.log('GOOD BYE!');
+    process.exit(0);
+}
+
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
 main().catch(err => {
     logger.error(err);

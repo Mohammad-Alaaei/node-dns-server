@@ -4,6 +4,7 @@ import { Record } from './record.mjs';
 import { RecordValue } from './record-value.mjs';
 import { Statistic } from './statistic.mjs';
 import { Setting } from './setting.mjs';
+import { User } from './user.mjs';
 
 /* -------------------------------------------------------------------------- */
 /*                              Associations                                  */
@@ -39,17 +40,14 @@ RecordValue.belongsTo(DnsServer, {
     as: 'dnsServer'
 });
 
-/* -------------------------------------------------------------------------- */
-/*                                  Exports                                   */
-/* -------------------------------------------------------------------------- */
-
 export {
     DnsServer,
     DnsRule,
     Record,
     RecordValue,
     Statistic,
-    Setting
+    Setting,
+    User
 };
 
 export default {
@@ -58,5 +56,6 @@ export default {
     Record,
     RecordValue,
     Statistic,
-    Setting
+    Setting,
+    User
 };
