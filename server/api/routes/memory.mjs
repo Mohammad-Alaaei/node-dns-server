@@ -2,19 +2,18 @@ import { Router } from 'express';
 import { store } from '../../../memory/store.mjs';
 import * as cacheService from '../../../services/cache_service.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
+import { paginateArray } from '../utils/pagination.mjs';
 
 const router = Router();
 
-// All memory/debug routes require auth. superadmin for now; viewer can be added later.
 router.use(authenticate, requireRole('superadmin', 'admin', 'viewer'));
 
 /**
- * GET /api/memory/store
- * Snapshot of in-memory resolver data (exact + regex records, upstream lists).
+ * GET /api/memory/store?page=1&limit=20
+ * Each in-memory collection is paginated with the same page/limit.
  */
 router.get('/store', (req, res) => {
     const exact = [];
-
     for (const [domain, record] of store.exactRecords.entries()) {
         exact.push(serializeMemoryRecord(domain, record));
     }
@@ -24,26 +23,22 @@ router.get('/store', (req, res) => {
     );
 
     res.json({
-        exactRecords: exact,
-        regexRecords: regex,
-        defaultDnsServers: store.defaultDnsServers,
-        customDnsServers: store.customDnsServers
+        exactRecords: paginateArray(exact, req.query),
+        regexRecords: paginateArray(regex, req.query),
+        defaultDnsServers: paginateArray(store.defaultDnsServers, req.query),
+        customDnsServers: paginateArray(store.customDnsServers, req.query)
     });
 });
 
 /**
- * GET /api/memory/pending-cache
- * Records waiting to be flushed to DB by cache_service.
+ * GET /api/memory/pending-cache?page=1&limit=20
  */
 router.get('/pending-cache', (req, res) => {
-    const pending = cacheService.getPendingCache
+    const pending = typeof cacheService.getPendingCache === 'function'
         ? cacheService.getPendingCache()
         : [];
 
-    res.json({
-        count: pending.length,
-        records: pending
-    });
+    res.json(paginateArray(pending, req.query));
 });
 
 function serializeMemoryRecord(domain, record) {

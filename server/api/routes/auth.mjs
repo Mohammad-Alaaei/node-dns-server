@@ -10,6 +10,7 @@ import {
 } from '../auth/jwt.mjs';
 import { getPublicKeyPem, decryptPassword } from '../auth/crypto.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
+import { paginateQuery } from '../utils/pagination.mjs';
 
 const router = Router();
 
@@ -48,7 +49,7 @@ function tokenPairResponse(user, accessToken, refresh) {
 function resolveEncryptedPassword(encryptedPassword) {
     if (!encryptedPassword || typeof encryptedPassword !== 'string') {
         return {
-            error: 'password required (get ciphertext from /api/auth/public-key)',
+            error: 'password required (base64 RSA-OAEP ciphertext from /api/auth/public-key)',
             status: 400
         };
     }
@@ -57,7 +58,7 @@ function resolveEncryptedPassword(encryptedPassword) {
         return { password: decryptPassword(encryptedPassword) };
     } catch {
         return {
-            error: 'Invalid encrypted password — fetch /api/auth/public-key and encrypt',
+            error: 'Invalid encrypted password — fetch /api/auth/public-key and encrypt with RSA-OAEP SHA-256',
             status: 400
         };
     }
@@ -236,15 +237,20 @@ router.post('/users', authenticate, requireRole('superadmin'), async (req, res, 
 });
 
 /**
- * GET /api/auth/users
+ * GET /api/auth/users?page=1&limit=20
  */
 router.get('/users', authenticate, requireRole('superadmin'), async (req, res, next) => {
     try {
-        const users = await User.findAll({
-            attributes: PUBLIC_USER_FIELDS,
-            order: [['id', 'ASC']]
-        });
-        return res.json({ users });
+        const result = await paginateQuery(req.query, ({ limit, offset }) =>
+            User.findAndCountAll({
+                attributes: PUBLIC_USER_FIELDS,
+                order: [['id', 'ASC']],
+                limit,
+                offset
+            })
+        );
+
+        return res.json(result);
     } catch (err) {
         return next(err);
     }
