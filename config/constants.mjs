@@ -35,3 +35,8 @@ export const RECORD_SOURCE = {
     CACHE: 'CACHE',
     FILTERED: 'FILTERED'
 };
+
+export const DNS_SERVER_TYPE = {
+    DEFAULT: 'DEFAULT',
+    CUSTOM: 'CUSTOM'
+}

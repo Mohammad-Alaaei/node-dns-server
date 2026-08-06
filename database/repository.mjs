@@ -7,7 +7,7 @@ import {
     RecordValue
 } from './models/index.mjs';
 import { store } from '../memory/store.mjs';
-import { RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
+import { DNS_SERVER_TYPE, RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
 
 /* -------------------------------------------------------------------------- */
 /*                                   Hits                                     */
@@ -545,7 +545,7 @@ export async function loadDnsServers() {
     const defaultServers = await DnsServer.findAll({
         where: {
             enabled: true,
-            type: 'DEFAULT'
+            type: DNS_SERVER_TYPE.DEFAULT
         },
         order: [
             ['priority', 'DESC'],

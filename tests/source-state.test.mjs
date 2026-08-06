@@ -18,6 +18,7 @@ import {
     hasLocalRecord
 } from '../memory/resolver.mjs';
 import { selectServer } from '../records/record_utils.mjs';
+import { DNS_SERVER_TYPE } from '../config/constants.mjs';
 
 describe('LOCAL source', () => {
 
@@ -139,8 +140,8 @@ describe('preferred (selected) server for re-resolve', () => {
     beforeEach(() => {
         resetStore();
         store.defaultDnsServers.push(
-            { id: 10, ip: '8.8.8.8', type: 'DEFAULT', enabled: 1 },
-            { id: 20, ip: '1.1.1.1', type: 'DEFAULT', enabled: 1 }
+            { id: 10, ip: '8.8.8.8', type: DNS_SERVER_TYPE.DEFAULT, enabled: 1 },
+            { id: 20, ip: '1.1.1.1', type: DNS_SERVER_TYPE.DEFAULT, enabled: 1 }
         );
     });
 

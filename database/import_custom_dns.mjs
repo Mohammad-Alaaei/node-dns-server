@@ -7,6 +7,7 @@ import {
     insertDnsRule,
     insertDnsServer
 } from './repository.mjs';
+import { DNS_SERVER_TYPE } from '../config/constants.mjs';
 
 const DOMAIN_FILE = process.env.DOMAIN_FILE ?? 'domains.txt';
 const TXT_FILES_DIR = process.env.TXT_FILES_DIR ?? './';
@@ -35,7 +36,7 @@ export async function importCustomDnsServers() {
 
         const serverId = await insertDnsServer({
             ip,
-            type: 'CUSTOM'
+            type: DNS_SERVER_TYPE.CUSTOM
         });
 
         const text = await fs.readFile(
