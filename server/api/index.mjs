@@ -6,6 +6,7 @@ import { requestLogger } from './middleware/requestLogger.mjs';
 import authRoutes from './routes/auth.mjs';
 import memoryRoutes from './routes/memory.mjs';
 import recordsRoutes from './routes/records.mjs';
+import dnsServersRoutes from './routes/dns-servers.mjs';
 import * as logger from '../../utils/logger.mjs';
 
 let server = null;
@@ -34,6 +35,7 @@ export async function startApi() {
     app.use('/api/auth', authRoutes);
     app.use('/api/memory', memoryRoutes);
     app.use('/api/records', recordsRoutes);
+    app.use('/api/dns-servers', dnsServersRoutes);
 
     // 404 for anything not matched above
     app.use((req, res) => {
