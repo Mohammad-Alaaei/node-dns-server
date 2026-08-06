@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import { User } from '../../../database/models/index.mjs';
 import { hashPassword, verifyPassword } from '../auth/password.mjs';
-import { signToken } from '../auth/jwt.mjs';
+import {
+    signAccessToken,
+    issueRefreshToken,
+    rotateRefreshToken,
+    revokeRefreshToken,
+    accessTokenMeta
+} from '../auth/jwt.mjs';
 import { getPublicKeyPem, decryptPassword } from '../auth/crypto.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
 
@@ -9,10 +15,34 @@ const router = Router();
 
 const PUBLIC_USER_FIELDS = ['id', 'username', 'role', 'created_at', 'updated_at'];
 
+function clearAuthCookies(res) {
+    const clear = 'Path=/; Max-Age=0; HttpOnly; SameSite=Strict';
+    res.setHeader('Set-Cookie', [
+        `token=; ${clear}`,
+        `accessToken=; ${clear}`,
+        `refreshToken=; ${clear}`,
+        `Authorization=; ${clear}`
+    ]);
+}
+
+function tokenPairResponse(user, accessToken, refresh) {
+    const meta = accessTokenMeta();
+    return {
+        accessToken,
+        refreshToken: refresh.refreshToken,
+        expiresIn: meta.expiresIn,
+        refreshExpiresIn: refresh.refreshExpiresIn,
+        refreshExpiresAt: refresh.refreshExpiresAt,
+        user: {
+            id: user.id,
+            username: user.username,
+            role: user.role
+        }
+    };
+}
+
 /**
  * GET /api/auth/public-key
- * Client fetches this, encrypts the password with RSA-OAEP (SHA-256),
- * then sends the base64 ciphertext as `password` on login.
  */
 router.get('/public-key', (_req, res) => {
     res.json({
@@ -24,9 +54,8 @@ router.get('/public-key', (_req, res) => {
 
 /**
  * POST /api/auth/login
- * Body: { username, password }
- * `password` MUST be base64 RSA-OAEP ciphertext of the real password
- * (encrypted with the public key from /api/auth/public-key).
+ * Body: { username, password } — password = base64 RSA-OAEP ciphertext
+ * Returns accessToken (short JWT) + refreshToken (opaque, stored hashed in DB)
  */
 router.post('/login', async (req, res, next) => {
     try {
@@ -57,17 +86,43 @@ router.post('/login', async (req, res, next) => {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        const token = signToken(user);
+        const accessToken = signAccessToken(user);
+        const refresh = await issueRefreshToken(user.id);
 
-        return res.json({
-            token,
-            expiresIn: process.env.API_JWT_EXPIRES_IN ?? '15m',
-            user: {
-                id: user.id,
-                username: user.username,
-                role: user.role
-            }
-        });
+        return res.json(tokenPairResponse(user, accessToken, refresh));
+    } catch (err) {
+        return next(err);
+    }
+});
+
+/**
+ * POST /api/auth/refresh
+ * Body: { refreshToken }
+ * Rotates refresh token and returns a new access + refresh pair.
+ */
+router.post('/refresh', async (req, res, next) => {
+    try {
+        const refreshToken =
+            req.body?.refreshToken ||
+            req.headers['x-refresh-token'];
+
+        if (!refreshToken) {
+            return res.status(400).json({ error: 'refreshToken required' });
+        }
+
+        const rotated = await rotateRefreshToken(refreshToken);
+
+        if (!rotated) {
+            return res.status(401).json({ error: 'Invalid or expired refresh token' });
+        }
+
+        const accessToken = signAccessToken(rotated.user);
+
+        return res.json(tokenPairResponse(rotated.user, accessToken, {
+            refreshToken: rotated.refreshToken,
+            refreshExpiresIn: rotated.refreshExpiresIn,
+            refreshExpiresAt: rotated.refreshExpiresAt
+        }));
     } catch (err) {
         return next(err);
     }
@@ -75,23 +130,29 @@ router.post('/login', async (req, res, next) => {
 
 /**
  * POST /api/auth/logout
- * Verifies the current Bearer token. No server-side blacklist (short-lived tokens).
- * Returns success + Set-Cookie headers so the client can clear any auth cookie.
+ * Body: { refreshToken } (or header X-Refresh-Token)
+ * Revokes the refresh token in DB so it cannot mint new access tokens.
+ * Access token is not required (may already be expired). Clears auth cookies.
  */
-router.post('/logout', authenticate, (req, res) => {
-    // Clear common auth cookie names if the frontend stores the token in a cookie
-    const clear = 'Path=/; Max-Age=0; HttpOnly; SameSite=Strict';
-    res.setHeader('Set-Cookie', [
-        `token=; ${clear}`,
-        `accessToken=; ${clear}`,
-        `Authorization=; ${clear}`
-    ]);
+router.post('/logout', async (req, res, next) => {
+    try {
+        const refreshToken =
+            req.body?.refreshToken ||
+            req.headers['x-refresh-token'];
 
-    res.json({
-        ok: true,
-        message: 'Logged out',
-        user: req.user
-    });
+        if (refreshToken) {
+            await revokeRefreshToken(refreshToken);
+        }
+
+        clearAuthCookies(res);
+
+        return res.json({
+            ok: true,
+            message: 'Logged out'
+        });
+    } catch (err) {
+        return next(err);
+    }
 });
 
 /**
@@ -103,10 +164,7 @@ router.get('/me', authenticate, (req, res) => {
 
 /**
  * POST /api/auth/users
- * Body: { username, password, role? }
- * Password here is PLAINTEXT (admin-to-server over TLS only) — same as bootstrap.
- * Encrypt-on-wire is required for the public login endpoint only.
- * superadmin only. Default role = viewer.
+ * superadmin only
  */
 router.post('/users', authenticate, requireRole('superadmin'), async (req, res, next) => {
     try {
@@ -153,7 +211,6 @@ router.post('/users', authenticate, requireRole('superadmin'), async (req, res, 
 
 /**
  * GET /api/auth/users
- * superadmin only — list users (no password hashes).
  */
 router.get('/users', authenticate, requireRole('superadmin'), async (req, res, next) => {
     try {

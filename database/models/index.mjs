@@ -5,10 +5,22 @@ import { RecordValue } from './record-value.mjs';
 import { Statistic } from './statistic.mjs';
 import { Setting } from './setting.mjs';
 import { User } from './user.mjs';
+import { RefreshToken } from './refresh-token.mjs';
 
 /* -------------------------------------------------------------------------- */
 /*                              Associations                                  */
 /* -------------------------------------------------------------------------- */
+
+User.hasMany(RefreshToken, {
+    foreignKey: 'user_id',
+    as: 'refreshTokens',
+    onDelete: 'CASCADE'
+});
+RefreshToken.belongsTo(User, {
+    foreignKey: 'user_id',
+    as: 'user'
+});
+
 
 DnsServer.hasMany(DnsRule, {
     foreignKey: 'server_id',
@@ -47,7 +59,8 @@ export {
     RecordValue,
     Statistic,
     Setting,
-    User
+    User,
+    RefreshToken
 };
 
 export default {
@@ -57,5 +70,6 @@ export default {
     RecordValue,
     Statistic,
     Setting,
-    User
+    User,
+    RefreshToken
 };

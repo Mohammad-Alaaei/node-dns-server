@@ -64,8 +64,10 @@ export const config = {
         host: process.env.API_HOST ?? '127.0.0.1',
         port: Number(process.env.API_PORT ?? 3000),
         jwtSecret: process.env.API_JWT_SECRET ?? 'change-me-in-production',
-        /** Short-lived access token only (no refresh tokens). */
-        jwtExpiresIn: process.env.API_JWT_EXPIRES_IN ?? '5m',
+        /** Short-lived access JWT */
+        jwtExpiresIn: process.env.API_JWT_EXPIRES_IN ?? '15m',
+        /** Long-lived opaque refresh token (stored hashed in DB) */
+        refreshExpiresIn: process.env.API_REFRESH_EXPIRES_IN ?? '7d',
         /**
          * Optional persistent RSA PEMs for login password encryption.
          * If unset, a fresh 2048-bit pair is generated each process start

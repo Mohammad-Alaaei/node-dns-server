@@ -1,8 +1,8 @@
-import { verifyToken } from '../auth/jwt.mjs';
+import { verifyAccessToken } from '../auth/jwt.mjs';
 import { User } from '../../../database/models/index.mjs';
 
 /**
- * Require a valid JWT. Attaches `req.user` = { id, username, role }.
+ * Require a valid access JWT. Attaches `req.user` = { id, username, role }.
  */
 export function authenticate(req, res, next) {
     const header = req.headers.authorization;
@@ -14,7 +14,7 @@ export function authenticate(req, res, next) {
     const token = header.slice(7);
 
     try {
-        const payload = verifyToken(token);
+        const payload = verifyAccessToken(token);
         req.user = {
             id: payload.sub,
             username: payload.username,
