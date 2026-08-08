@@ -8,6 +8,25 @@ function parseIpList(value) {
         .filter(Boolean);
 }
 
+function parseCsv(value, fallback = '') {
+    return (value ?? fallback)
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+}
+
+/** "*" → allow all; otherwise list of exact origin URLs. Empty → CORS off. */
+function parseCorsOrigins(value) {
+    const raw = (value ?? '').trim();
+    if (!raw) {
+        return [];
+    }
+    if (raw === '*') {
+        return ['*'];
+    }
+    return parseCsv(raw);
+}
+
 /**
  * Single source of truth for app configuration.
  *
@@ -80,7 +99,25 @@ export const config = {
             : null,
         rsaPrivateKey: process.env.API_RSA_PRIVATE_KEY
             ? process.env.API_RSA_PRIVATE_KEY.replace(/\\n/g, '\n')
-            : null
+            : null,
+        /**
+         * CORS for browser frontends.
+         * origins: comma-separated list, or "*" for any origin.
+         * When credentials=true, browsers forbid "*" — use explicit origins.
+         */
+        cors: {
+            origins: parseCorsOrigins(process.env.API_CORS_ORIGINS),
+            credentials: process.env.API_CORS_CREDENTIALS !== 'false',
+            methods: parseCsv(
+                process.env.API_CORS_METHODS,
+                'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS'
+            ),
+            allowedHeaders: parseCsv(
+                process.env.API_CORS_HEADERS,
+                'Content-Type,Authorization'
+            ),
+            maxAge: Number(process.env.API_CORS_MAX_AGE ?? 86400)
+        }
     },
 
     admin: {

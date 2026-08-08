@@ -3,6 +3,7 @@ import { config } from '../../config/config.mjs';
 import { ensureBootstrapAdmin } from './auth/bootstrap.mjs';
 import { initLoginCrypto } from './auth/crypto.mjs';
 import { requestLogger } from './middleware/requestLogger.mjs';
+import { corsMiddleware } from './middleware/cors.mjs';
 import authRoutes from './routes/auth.mjs';
 import memoryRoutes from './routes/memory.mjs';
 import recordsRoutes from './routes/records.mjs';
@@ -29,6 +30,7 @@ export async function startApi() {
     // Trust proxy if behind reverse proxy (correct req.ip)
     app.set('trust proxy', 1);
 
+    app.use(corsMiddleware);
     app.use(requestLogger);
     app.use(express.json({ limit: '1mb' }));
 
