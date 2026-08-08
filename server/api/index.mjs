@@ -9,6 +9,7 @@ import recordsRoutes from './routes/records.mjs';
 import dnsServersRoutes from './routes/dns-servers.mjs';
 import logsRoutes from './routes/logs.mjs';
 import systemRoutes from './routes/system.mjs';
+import statisticsRoutes from './routes/statistics.mjs';
 import * as logger from '../../utils/logger.mjs';
 
 let server = null;
@@ -40,6 +41,7 @@ export async function startApi() {
     app.use('/api/dns-servers', dnsServersRoutes);
     app.use('/api/logs', logsRoutes);
     app.use('/api/system', systemRoutes);
+    app.use('/api/statistics', statisticsRoutes);
 
     // 404 for anything not matched above
     app.use((req, res) => {
