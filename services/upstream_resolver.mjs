@@ -7,7 +7,6 @@ import { DNS_TYPES, RECORD_STATUS } from '../config/constants.mjs';
 import { config } from '../config/config.mjs';
 import { Packet } from 'dns2';
 
-const DNS_TIMEOUT = config.dns.timeout;
 const DNS_PORT = config.dns.port;
 
 export function forwardToExternalDns(message, server) {
@@ -27,7 +26,7 @@ export function forwardToExternalDns(message, server) {
                 RECORD_STATUS.TIMEOUT
             );
             reject(new Error(`DNS query timed out (${server.ip})`));
-        }, DNS_TIMEOUT);
+        }, config.system.dns.timeout);
 
         client.once('error', async err => {
             clearTimeout(timeout);

@@ -8,8 +8,13 @@ import { hasLocalRecord } from '../memory/resolver.mjs';
 import { normalizeDomain } from '../utils/domain_utils.mjs';
 import { store } from '../memory/store.mjs';
 
-const FLUSH_INTERVAL_MS = config.cache.flushInterval;
-const FILTER_IPS = new Set(config.cache.filterIps);
+function getFlushIntervalMs() {
+    return config.system.cache.flushInterval;
+}
+
+function getFilterIpSet() {
+    return new Set(config.system.cache.filterIps ?? []);
+}
 
 const pendingCache = new Map();
 
@@ -163,7 +168,7 @@ export function cacheRecord(record, dnsServerId = null) {
 
     const source =
         [...(record.A ?? []), ...(record.AAAA ?? [])]
-            .some(r => FILTER_IPS.has(r.address))
+            .some(r => getFilterIpSet().has(r.address))
             ? RECORD_SOURCE.FILTERED
             : RECORD_SOURCE.CACHE;
 
@@ -222,7 +227,7 @@ export async function init() {
 
     flushTimer = setInterval(() => {
         void flush();
-    }, FLUSH_INTERVAL_MS);
+    }, getFlushIntervalMs());
 
 }
 

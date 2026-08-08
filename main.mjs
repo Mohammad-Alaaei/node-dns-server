@@ -1,7 +1,11 @@
 import { config } from './config/config.mjs';
 
 import { createSchema } from './database/schema.mjs';
-import { loadRecords, loadDnsServers } from './database/repository.mjs';
+import {
+    loadRecords,
+    loadDnsServers,
+    loadSystemSettings
+} from './database/repository.mjs';
 
 import * as logger from './utils/logger.mjs';
 import * as cacheService from './services/cache_service.mjs';
@@ -11,13 +15,12 @@ import { startApi, stopApi } from './server/api/index.mjs';
 import { store } from './memory/store.mjs';
 import { CACHE_LEVELS } from './config/constants.mjs';
 
-const CACHE_LEVEL = config.cache.level;
-
 const SERVER_IP = config.server.ip;
 const SERVER_PORT = config.server.port;
 
 async function main() {
     await createSchema();
+    await loadSystemSettings();
 
     await loadRecords();
     await loadDnsServers();
@@ -28,8 +31,7 @@ async function main() {
     // are gated by CACHE_LEVEL inside response_parser.
     await logger.init();
 
-    // Cache flusher only when some level may write records
-    if (CACHE_LEVEL !== CACHE_LEVELS.NONE) {
+    if (config.system.cache.level !== CACHE_LEVELS.NONE) {
         await cacheService.init();
     }
 
@@ -41,8 +43,7 @@ async function shutdown(signal) {
     logger.info(`Shutting down (${signal})…`);
     try {
         await stopApi();
-
-        if (CACHE_LEVEL !== CACHE_LEVELS.NONE) {
+        if (config.system.cache.level !== CACHE_LEVELS.NONE) {
             await cacheService.shutdown();
         }
 

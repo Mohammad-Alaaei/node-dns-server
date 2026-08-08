@@ -1,14 +1,20 @@
+import { Op } from 'sequelize';
 import { User } from '../../../database/models/index.mjs';
 import { config } from '../../../config/config.mjs';
+import { SYSTEM_USER_ID } from '../../../config/settings_schema.mjs';
 import { hashPassword } from './password.mjs';
 import * as logger from '../../../utils/logger.mjs';
 
 /**
- * If the users table is empty and ADMIN_PASSWORD is set,
+ * If no real (non-system) user exists and ADMIN_PASSWORD is set,
  * create the initial superadmin from env.
  */
 export async function ensureBootstrapAdmin() {
-    const count = await User.count();
+    const count = await User.count({
+        where: {
+            id: { [Op.ne]: SYSTEM_USER_ID }
+        }
+    });
 
     if (count > 0) {
         return;
@@ -18,7 +24,7 @@ export async function ensureBootstrapAdmin() {
 
     if (!password) {
         logger.warn(
-            'No users in DB and ADMIN_PASSWORD is empty — ' +
+            'No admin users in DB and ADMIN_PASSWORD is empty — ' +
             'set ADMIN_USERNAME / ADMIN_PASSWORD in .env then restart to create superadmin'
         );
         return;

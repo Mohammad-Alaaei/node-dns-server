@@ -95,7 +95,7 @@ router.post('/login', async (req, res, next) => {
 
         const user = await User.findOne({ where: { username } });
 
-        if (!user) {
+        if (!user || user.role === 'system' || user.id === 0) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 

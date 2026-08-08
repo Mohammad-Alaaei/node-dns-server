@@ -4,10 +4,22 @@ import {
     DnsServer,
     DnsRule,
     Record,
-    RecordValue
+    RecordValue,
+    Setting
 } from './models/index.mjs';
 import { store } from '../memory/store.mjs';
-import { DNS_SERVER_TYPE, RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
+import { RECORD_SOURCE, RECORD_STATUS, DNS_SERVER_TYPE } from '../config/constants.mjs';
+import {
+    config,
+    getSystemSettingsDefaults,
+    getUserSettingsDefaults
+} from '../config/config.mjs';
+import {
+    SYSTEM_USER_ID,
+    deepMerge,
+    sanitizeSystemPatch,
+    sanitizeUserPatch
+} from '../config/settings_schema.mjs';
 
 /* -------------------------------------------------------------------------- */
 /*                                   Hits                                     */
@@ -148,6 +160,7 @@ function ensureMemoryRecord(row) {
 
     if (row.is_regex) {
         let record = collection.find(r => r.domain === row.domain);
+
         if (!record) {
             record = createRecord(row);
             record.regex = new RegExp(`^(?:${row.domain})$`, 'i');
@@ -170,6 +183,7 @@ function ensureMemoryRecord(row) {
     }
 
     let record = collection.get(row.domain);
+
     if (!record) {
         record = createRecord(row);
         collection.set(row.domain, record);
@@ -306,7 +320,7 @@ async function upsertRecordValue(
         }
 
         lastSuccessAt = now;
-        isStale = false;          // SUCCESS clears stale for this type
+        isStale = false;
         selectedValue = !!selected;
     }
     else if (status === RECORD_STATUS.FILTERED) {
@@ -472,7 +486,9 @@ export async function disableLocalRecord(domain) {
 }
 
 export async function saveLookupStatus(domain, dnsServerId, type, status) {
-    const existing = await Record.findOne({ where: { domain } });
+    const existing = await Record.findOne({
+        where: { domain }
+    });
 
     // Do not attach lookup noise to LOCAL domains
     if (existing?.source === RECORD_SOURCE.LOCAL) {
@@ -484,7 +500,15 @@ export async function saveLookupStatus(domain, dnsServerId, type, status) {
         source: RECORD_SOURCE.CACHE
     });
 
-    await upsertRecordValue(recordId, dnsServerId, type, status, [], false);
+    await upsertRecordValue(
+        recordId,
+        dnsServerId,
+        type,
+        status,
+        [],
+        false
+    );
+
     await updateRecordSource(recordId);
 }
 
@@ -674,4 +698,102 @@ export async function getDnsServers() {
         ]
     });
     return rows.map(r => r.get({ plain: true }));
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                 Settings                                   */
+/* -------------------------------------------------------------------------- */
+
+function parseSettingsJson(raw) {
+    if (raw == null || raw === '') {
+        return {};
+    }
+    try {
+        const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    } catch {
+        return {};
+    }
+}
+
+/**
+ * Load system settings from DB (user_id = 0) and merge into config.system in-place.
+ * config.system remains the single runtime source of truth.
+ */
+export async function loadSystemSettings() {
+    const row = await Setting.findByPk(SYSTEM_USER_ID);
+    const fromDb = row ? parseSettingsJson(row.value) : {};
+    const merged = deepMerge(getSystemSettingsDefaults(), fromDb);
+
+    // Mutate nested objects so existing references to config.system.* stay valid
+    Object.assign(config.system.cache, merged.cache);
+    config.system.ignoreIps = [...(merged.ignoreIps ?? [])];
+    Object.assign(config.system.dns, merged.dns);
+    Object.assign(config.system.server, merged.server);
+
+    return structuredClone(config.system);
+}
+
+/** Current system settings (same object as config.system). */
+export function getSystemSettings() {
+    return structuredClone(config.system);
+}
+
+/**
+ * Validate, merge into config.system, persist full JSON for user_id = 0.
+ */
+export async function patchSystemSettings(patch) {
+    const sanitized = sanitizeSystemPatch(patch);
+    if (sanitized.error) {
+        return sanitized;
+    }
+
+    const next = deepMerge(structuredClone(config.system), sanitized.data);
+
+    Object.assign(config.system.cache, next.cache);
+    config.system.ignoreIps = [...(next.ignoreIps ?? [])];
+    Object.assign(config.system.dns, next.dns);
+    Object.assign(config.system.server, next.server);
+
+    const now = Date.now();
+    await Setting.upsert({
+        user_id: SYSTEM_USER_ID,
+        value: JSON.stringify(config.system),
+        updated_at: now
+    });
+
+    return { data: structuredClone(config.system) };
+}
+
+export async function getUserSettings(userId) {
+    if (!userId || userId === SYSTEM_USER_ID) {
+        return getUserSettingsDefaults();
+    }
+
+    const row = await Setting.findByPk(userId);
+    const fromDb = row ? parseSettingsJson(row.value) : {};
+    return deepMerge(getUserSettingsDefaults(), fromDb);
+}
+
+export async function patchUserSettings(userId, patch) {
+    if (!userId || userId === SYSTEM_USER_ID) {
+        return { error: 'invalid user id', status: 400 };
+    }
+
+    const sanitized = sanitizeUserPatch(patch);
+    if (sanitized.error) {
+        return { error: sanitized.error, status: 400 };
+    }
+
+    const current = await getUserSettings(userId);
+    const next = deepMerge(current, sanitized.data);
+    const now = Date.now();
+
+    await Setting.upsert({
+        user_id: userId,
+        value: JSON.stringify(next),
+        updated_at: now
+    });
+
+    return { data: next };
 }

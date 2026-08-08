@@ -3,8 +3,7 @@ import { config } from '../config/config.mjs';
 import { findRecord } from '../memory/resolver.mjs';
 import { selectServer } from '../records/record_utils.mjs';
 
-const DNS_TTL = config.dns.ttl;
-const DEBUG_PREFIX = config.server.debugPrefix;
+// Read from config.system at use-time so DB-loaded settings apply
 
 
 /**
@@ -52,7 +51,7 @@ function appendDebugRecords(packet, request, info) {
             name: request.questions[0].name,
             type: Packet.TYPE.TXT,
             class: Packet.CLASS.IN,
-            ttl: DNS_TTL,
+            ttl: config.system.dns.ttl,
             data: record
         });
     }
@@ -151,7 +150,7 @@ function createPtrResponse(request, hostname) {
         name: request.questions[0].name,
         type: Packet.TYPE.PTR,
         class: Packet.CLASS.IN,
-        ttl: DNS_TTL,
+        ttl: config.system.dns.ttl,
         domain: hostname
     });
 
@@ -184,7 +183,7 @@ function decorateDebugResponse(
     resolver
 ) {
     const answers = [];
-    const debugName = `${DEBUG_PREFIX}${domain}`;
+    const debugName = `${config.system.server.debugPrefix}${domain}`;
 
     packet.questions[0].name = debugName;
 
@@ -235,7 +234,7 @@ function decorateDebugResponse(
 function createCnameResponse(
     request,
     names,
-    ttl = DNS_TTL
+    ttl = config.system.dns.ttl
 ) {
     const response = Packet.createResponseFromRequest(request);
 
