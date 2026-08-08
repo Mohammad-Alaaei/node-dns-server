@@ -15,7 +15,7 @@ import { CACHE_LEVELS } from '../config/constants.mjs';
  * @param {{ isCustom: boolean, isFiltered: boolean }} ctx
  */
 export function shouldProcessUpstreamAnswer({ isCustom, isFiltered }) {
-    switch (config.cache.level) {
+    switch (config.system.cache.level) {
         case CACHE_LEVELS.ALL:
             return true;
         case CACHE_LEVELS.CUSTOM_ONLY:
@@ -29,9 +29,9 @@ export function shouldProcessUpstreamAnswer({ isCustom, isFiltered }) {
 }
 
 export function getCacheLevel() {
-    return config.cache.level;
+    return config.system.cache.level;
 }
 
 export function isCacheEnabled() {
-    return config.cache.level !== CACHE_LEVELS.NONE;
+    return config.system.cache.level !== CACHE_LEVELS.NONE;
 }
