@@ -3,7 +3,7 @@ import { Op } from 'sequelize';
 import { Record, RecordValue, DnsServer } from '../../../database/models/index.mjs';
 import { RECORD_SOURCE } from '../../../config/constants.mjs';
 import { normalizeDomain } from '../../../utils/domain_utils.mjs';
-import { store } from '../../../memory/store.mjs';
+import { applyRecordPatchByIds } from '../../../memory/apply.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
 import { paginateQuery } from '../utils/pagination.mjs';
 
@@ -91,8 +91,10 @@ router.patch(
                 { where: { id: { [Op.in]: idList } } }
             );
 
-            // Best-effort in-memory flag so resolver sees disable without full reload
-            patchMemoryByIds(idList, { enabled });
+            applyRecordPatchByIds(idList, {
+                enabled,
+                updatedAt: now
+            });
 
             return res.json({
                 ok: true,
@@ -138,7 +140,10 @@ router.post(
                 }
             );
 
-            patchMemoryByIds(idList, { source: RECORD_SOURCE.LOCAL });
+            applyRecordPatchByIds(idList, {
+                source: RECORD_SOURCE.LOCAL,
+                updatedAt: now
+            });
 
             return res.json({
                 ok: true,
@@ -381,38 +386,6 @@ async function resolveCnameChain(rootDetail, maxDepth = 16) {
     }
 
     return chain;
-}
-
-/**
- * Best-effort patch of in-memory store by record id.
- * Does not rebuild servers/values — only scalar fields (enabled, source, …).
- */
-function patchMemoryByIds(ids, patch) {
-    const idSet = new Set(ids);
-
-    for (const record of store.exactRecords.values()) {
-        if (record.id != null && idSet.has(record.id)) {
-            Object.assign(record, patch);
-            if (patch.source != null) {
-                record.source = patch.source;
-            }
-            if (patch.enabled != null) {
-                record.enabled = patch.enabled;
-            }
-        }
-    }
-
-    for (const record of store.regexRecords) {
-        if (record.id != null && idSet.has(record.id)) {
-            Object.assign(record, patch);
-            if (patch.source != null) {
-                record.source = patch.source;
-            }
-            if (patch.enabled != null) {
-                record.enabled = patch.enabled;
-            }
-        }
-    }
 }
 
 export default router;

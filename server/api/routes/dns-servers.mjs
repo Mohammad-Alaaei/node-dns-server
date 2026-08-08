@@ -3,8 +3,12 @@ import { isIPv4 } from 'node:net';
 import { Op } from 'sequelize';
 import { DnsServer, DnsRule } from '../../../database/models/index.mjs';
 import { DNS_SERVER_TYPE } from '../../../config/constants.mjs';
-import { loadDnsServers } from '../../../database/repository.mjs';
 import { prepareRuleDomain } from '../../../utils/domain_utils.mjs';
+import {
+    applyDnsServerUpsert,
+    applyDnsRuleUpsert,
+    applyDnsRuleRemove
+} from '../../../memory/apply.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
 import { paginateQuery } from '../utils/pagination.mjs';
 
@@ -82,7 +86,7 @@ router.post('/', requireRole('superadmin'), async (req, res, next) => {
             timeouts: 0
         });
 
-        await loadDnsServers();
+        applyDnsServerUpsert(created);
 
         return res.status(201).json({
             server: serializeServer(created)
@@ -169,7 +173,18 @@ router.patch('/:id', requireRole('superadmin'), async (req, res, next) => {
             priority: nextState.priority
         });
 
-        await loadDnsServers();
+        // If enabling a server that already has rules, attach groups from DB rules
+        if (nextState.enabled) {
+            const rules = await DnsRule.findAll({
+                where: { server_id: id }
+            });
+            applyDnsServerUpsert(server);
+            for (const rule of rules) {
+                applyDnsRuleUpsert(rule, server);
+            }
+        } else {
+            applyDnsServerUpsert(server);
+        }
 
         return res.json({ server: serializeServer(server) });
     } catch (err) {
@@ -225,7 +240,7 @@ router.post('/:id/rules', requireRole('superadmin'), async (req, res, next) => {
             return res.status(400).json({ error: 'invalid id' });
         }
 
-        const server = await DnsServer.findByPk(serverId, { attributes: ['id'] });
+        const server = await DnsServer.findByPk(serverId);
         if (!server) {
             return res.status(404).json({ error: 'DNS server not found' });
         }
@@ -241,7 +256,7 @@ router.post('/:id/rules', requireRole('superadmin'), async (req, res, next) => {
             is_regex: prepared.is_regex
         });
 
-        await loadDnsServers();
+        applyDnsRuleUpsert(rule, server);
 
         return res.status(201).json({ rule: serializeRule(rule) });
     } catch (err) {
@@ -275,10 +290,15 @@ router.patch('/rules/:ruleId', requireRole('superadmin'), async (req, res, next)
             return res.status(400).json({ error: prepared.error });
         }
 
+        const previousDomain = rule.domain;
         rule.domain = prepared.domain;
         rule.is_regex = prepared.is_regex;
         await rule.save();
-        await loadDnsServers();
+
+        const server = await DnsServer.findByPk(rule.server_id);
+        if (server) {
+            applyDnsRuleUpsert(rule, server, previousDomain);
+        }
 
         return res.json({ rule: serializeRule(rule) });
     } catch (err) {
@@ -297,13 +317,16 @@ router.delete('/rules/:ruleId', requireRole('superadmin'), async (req, res, next
             return res.status(400).json({ error: 'invalid id' });
         }
 
-        const deleted = await DnsRule.destroy({ where: { id: ruleId } });
-
-        if (!deleted) {
+        const rule = await DnsRule.findByPk(ruleId);
+        if (!rule) {
             return res.status(404).json({ error: 'Rule not found' });
         }
 
-        await loadDnsServers();
+        const domain = rule.domain;
+        const serverId = rule.server_id;
+
+        await rule.destroy();
+        applyDnsRuleRemove(domain, serverId);
 
         return res.json({ ok: true });
     } catch (err) {
