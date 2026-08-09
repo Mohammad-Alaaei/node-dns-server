@@ -10,7 +10,7 @@ import {
 } from '../auth/jwt.mjs';
 import { getPublicKeyPem, decryptPassword } from '../auth/crypto.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
-import { paginateQuery } from '../utils/pagination.mjs';
+import { listQuery } from '../utils/list_query.mjs';
 
 const router = Router();
 
@@ -239,16 +239,42 @@ router.post('/users', authenticate, requireRole('superadmin'), async (req, res, 
 /**
  * GET /api/auth/users?page=1&limit=20
  */
+const USERS_LIST_SCHEMA = {
+    searchable: ['username', 'role'],
+    filterable: ['id', 'username', 'role'],
+    sortable: ['id', 'username', 'role', 'created_at', 'updated_at'],
+    defaultSort: ['id', 'ASC'],
+    fieldTypes: {
+        id: 'number',
+        created_at: 'number',
+        updated_at: 'number'
+    }
+};
+
+/**
+ * GET /api/auth/users?page=1&limit=20
+ *   &searchField=username&search=admin
+ *   &filter[role]=viewer&filterLogic=AND
+ *   &sortBy=username&sortDir=ASC
+ */
 router.get('/users', authenticate, requireRole('superadmin'), async (req, res, next) => {
     try {
-        const result = await paginateQuery(req.query, ({ limit, offset }) =>
-            User.findAndCountAll({
-                attributes: PUBLIC_USER_FIELDS,
-                order: [['id', 'ASC']],
-                limit,
-                offset
-            })
+        const result = await listQuery(
+            req.query,
+            USERS_LIST_SCHEMA,
+            ({ where, order, limit, offset }) =>
+                User.findAndCountAll({
+                    attributes: PUBLIC_USER_FIELDS,
+                    where,
+                    order,
+                    limit,
+                    offset
+                })
         );
+
+        if (result.error) {
+            return res.status(result.status ?? 400).json({ error: result.error });
+        }
 
         return res.json(result);
     } catch (err) {

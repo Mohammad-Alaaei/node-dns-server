@@ -5,7 +5,7 @@ import { RECORD_SOURCE, DNS_SERVER_TYPE } from '../../../config/constants.mjs';
 import * as cacheService from '../../../services/cache_service.mjs';
 import { memoryCounts } from '../../../memory/apply.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
-import { paginateQuery } from '../utils/pagination.mjs';
+import { listQuery } from '../utils/list_query.mjs';
 
 const router = Router();
 
@@ -134,29 +134,49 @@ router.get('/summary', async (req, res, next) => {
  */
 router.get('/dns-servers', async (req, res, next) => {
     try {
-        const result = await paginateQuery(req.query, ({ limit, offset }) =>
-            DnsServer.findAndCountAll({
-                attributes: [
-                    'id',
-                    'ip',
-                    'type',
-                    'enabled',
-                    'priority',
-                    'average_latency',
-                    'successes',
-                    'failures',
-                    'timeouts'
+        const result = await listQuery(
+            req.query,
+            {
+                searchable: ['ip', 'type'],
+                filterable: ['id', 'ip', 'type', 'enabled', 'priority'],
+                sortable: [
+                    'id', 'ip', 'type', 'enabled', 'priority',
+                    'average_latency', 'successes', 'failures', 'timeouts'
                 ],
-                order: [
-                    ['type', 'ASC'],
-                    ['priority', 'DESC'],
-                    ['average_latency', 'ASC'],
-                    ['id', 'ASC']
-                ],
-                limit,
-                offset
-            })
+                defaultSort: ['type', 'ASC'],
+                fieldTypes: {
+                    id: 'number',
+                    enabled: 'boolean',
+                    priority: 'number',
+                    average_latency: 'number',
+                    successes: 'number',
+                    failures: 'number',
+                    timeouts: 'number'
+                }
+            },
+            ({ where, order, limit, offset }) =>
+                DnsServer.findAndCountAll({
+                    attributes: [
+                        'id',
+                        'ip',
+                        'type',
+                        'enabled',
+                        'priority',
+                        'average_latency',
+                        'successes',
+                        'failures',
+                        'timeouts'
+                    ],
+                    where,
+                    order,
+                    limit,
+                    offset
+                })
         );
+
+        if (result.error) {
+            return res.status(result.status ?? 400).json({ error: result.error });
+        }
 
         result.items = result.items.map(row => {
             const s = row.get ? row.get({ plain: true }) : row;
@@ -180,45 +200,64 @@ router.get('/dns-servers', async (req, res, next) => {
 });
 
 /**
- * GET /api/statistics/top-records?by=hits|last_hit&limit=20
- * Top domains by hits or last_hit (fixed limit, not page-based).
+ * GET /api/statistics/top-records
+ * Supports same list query as records, default sort hits DESC.
+ * Legacy: ?by=hits|last_hit still maps to sortBy when sortBy omitted.
  */
 router.get('/top-records', async (req, res, next) => {
     try {
-        const by = String(req.query.by ?? 'hits').toLowerCase();
-        if (by !== 'hits' && by !== 'last_hit') {
-            return res.status(400).json({ error: 'by must be hits or last_hit' });
+        const query = { ...req.query };
+
+        // Legacy alias
+        if (!query.sortBy && query.by) {
+            const by = String(query.by).toLowerCase();
+            if (by !== 'hits' && by !== 'last_hit') {
+                return res.status(400).json({ error: 'by must be hits or last_hit' });
+            }
+            query.sortBy = by;
+            query.sortDir = query.sortDir ?? 'DESC';
         }
 
-        let limit = Number.parseInt(String(req.query.limit ?? TOP_DEFAULT), 10);
-        if (!Number.isFinite(limit) || limit < 1) {
-            limit = TOP_DEFAULT;
+        const result = await listQuery(
+            query,
+            {
+                searchable: ['domain', 'source'],
+                filterable: ['id', 'domain', 'enabled', 'source', 'hits'],
+                sortable: ['id', 'domain', 'enabled', 'source', 'hits', 'last_hit', 'updated_at'],
+                defaultSort: ['hits', 'DESC'],
+                fieldTypes: {
+                    id: 'number',
+                    enabled: 'boolean',
+                    hits: 'number',
+                    last_hit: 'number',
+                    updated_at: 'number'
+                }
+            },
+            ({ where, order, limit, offset }) =>
+                Record.findAndCountAll({
+                    attributes: [
+                        'id',
+                        'domain',
+                        'enabled',
+                        'source',
+                        'hits',
+                        'last_hit',
+                        'updated_at'
+                    ],
+                    where,
+                    order,
+                    limit,
+                    offset
+                }),
+            { defaultLimit: 20, maxLimit: 100 }
+        );
+
+        if (result.error) {
+            return res.status(result.status ?? 400).json({ error: result.error });
         }
-        if (limit > TOP_MAX) {
-            limit = TOP_MAX;
-        }
 
-        const orderCol = by === 'last_hit' ? 'last_hit' : 'hits';
-
-        const rows = await Record.findAll({
-            attributes: [
-                'id',
-                'domain',
-                'enabled',
-                'source',
-                'hits',
-                'last_hit',
-                'updated_at'
-            ],
-            order: [
-                [orderCol, 'DESC'],
-                ['id', 'DESC']
-            ],
-            limit
-        });
-
-        const items = rows.map(row => {
-            const r = row.get({ plain: true });
+        result.items = result.items.map(row => {
+            const r = row.get ? row.get({ plain: true }) : row;
             return {
                 id: r.id,
                 domain: r.domain,
@@ -230,11 +269,7 @@ router.get('/top-records', async (req, res, next) => {
             };
         });
 
-        return res.json({
-            by,
-            limit,
-            items
-        });
+        return res.json(result);
     } catch (err) {
         return next(err);
     }

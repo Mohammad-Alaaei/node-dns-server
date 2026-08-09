@@ -27,6 +27,9 @@ export async function startApi() {
 
     const app = express();
 
+    // Nested query keys: filter[source]=CACHE → req.query.filter.source
+    app.set('query parser', 'extended');
+
     // Trust proxy if behind reverse proxy (correct req.ip)
     app.set('trust proxy', 1);
 

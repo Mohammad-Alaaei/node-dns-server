@@ -10,7 +10,7 @@ import {
     applyDnsRuleRemove
 } from '../../../memory/apply.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
-import { paginateQuery } from '../utils/pagination.mjs';
+import { listQuery } from '../utils/list_query.mjs';
 
 const router = Router();
 
@@ -33,20 +33,49 @@ router.use(authenticate, requireRole('superadmin', 'admin', 'viewer'));
 /**
  * GET /api/dns-servers?page=1&limit=20
  */
+const DNS_SERVERS_LIST_SCHEMA = {
+    searchable: ['ip', 'type'],
+    filterable: ['id', 'ip', 'type', 'enabled', 'priority'],
+    sortable: [
+        'id', 'ip', 'type', 'enabled', 'priority',
+        'average_latency', 'successes', 'failures', 'timeouts'
+    ],
+    defaultSort: ['type', 'ASC'],
+    fieldTypes: {
+        id: 'number',
+        enabled: 'boolean',
+        priority: 'number',
+        average_latency: 'number',
+        successes: 'number',
+        failures: 'number',
+        timeouts: 'number'
+    }
+};
+
+/**
+ * GET /api/dns-servers?page=1&limit=20
+ *   &searchField=ip&search=8.8
+ *   &filter[type]=DEFAULT&filterLogic=AND
+ *   &sortBy=priority&sortDir=DESC
+ */
 router.get('/', async (req, res, next) => {
     try {
-        const result = await paginateQuery(req.query, ({ limit, offset }) =>
-            DnsServer.findAndCountAll({
-                attributes: SERVER_LIST_ATTRIBUTES,
-                order: [
-                    ['type', 'ASC'],
-                    ['priority', 'DESC'],
-                    ['id', 'ASC']
-                ],
-                limit,
-                offset
-            })
+        const result = await listQuery(
+            req.query,
+            DNS_SERVERS_LIST_SCHEMA,
+            ({ where, order, limit, offset }) =>
+                DnsServer.findAndCountAll({
+                    attributes: SERVER_LIST_ATTRIBUTES,
+                    where,
+                    order,
+                    limit,
+                    offset
+                })
         );
+
+        if (result.error) {
+            return res.status(result.status ?? 400).json({ error: result.error });
+        }
 
         result.items = result.items.map(row =>
             row.get ? row.get({ plain: true }) : row
@@ -207,18 +236,31 @@ router.get('/:id/rules', async (req, res, next) => {
             return res.status(404).json({ error: 'DNS server not found' });
         }
 
-        const result = await paginateQuery(req.query, ({ limit, offset }) =>
-            DnsRule.findAndCountAll({
-                where: { server_id: serverId },
-                order: [
-                    ['is_regex', 'ASC'],
-                    ['domain', 'ASC'],
-                    ['id', 'ASC']
-                ],
-                limit,
-                offset
-            })
+        const result = await listQuery(
+            req.query,
+            {
+                searchable: ['domain'],
+                filterable: ['id', 'domain', 'is_regex'],
+                sortable: ['id', 'domain', 'is_regex'],
+                defaultSort: ['domain', 'ASC'],
+                fieldTypes: {
+                    id: 'number',
+                    is_regex: 'boolean'
+                },
+                baseWhere: { server_id: serverId }
+            },
+            ({ where, order, limit, offset }) =>
+                DnsRule.findAndCountAll({
+                    where,
+                    order,
+                    limit,
+                    offset
+                })
         );
+
+        if (result.error) {
+            return res.status(result.status ?? 400).json({ error: result.error });
+        }
 
         result.items = result.items.map(row => serializeRule(row));
 

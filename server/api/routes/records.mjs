@@ -5,7 +5,7 @@ import { RECORD_SOURCE } from '../../../config/constants.mjs';
 import { normalizeDomain } from '../../../utils/domain_utils.mjs';
 import { applyRecordPatchByIds } from '../../../memory/apply.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
-import { paginateQuery } from '../utils/pagination.mjs';
+import { listQuery } from '../utils/list_query.mjs';
 
 const router = Router();
 
@@ -39,19 +39,45 @@ router.use(authenticate, requireRole('superadmin', 'admin', 'viewer'));
  * GET /api/records?page=1&limit=20
  * Brief list for the records page (no is_regex, no values).
  */
+const RECORDS_LIST_SCHEMA = {
+    searchable: ['domain', 'source'],
+    filterable: ['id', 'domain', 'enabled', 'source', 'hits'],
+    sortable: ['id', 'domain', 'enabled', 'source', 'hits', 'last_hit', 'created_at', 'updated_at'],
+    defaultSort: ['updated_at', 'DESC'],
+    fieldTypes: {
+        id: 'number',
+        enabled: 'boolean',
+        hits: 'number',
+        last_hit: 'number',
+        created_at: 'number',
+        updated_at: 'number'
+    }
+};
+
+/**
+ * GET /api/records?page=1&limit=20
+ *   &searchField=domain&search=google
+ *   &filter[source]=CACHE&filterLogic=AND
+ *   &sortBy=hits&sortDir=DESC
+ */
 router.get('/', async (req, res, next) => {
     try {
-        const result = await paginateQuery(req.query, ({ limit, offset }) =>
-            Record.findAndCountAll({
-                attributes: LIST_ATTRIBUTES,
-                order: [
-                    ['updated_at', 'DESC'],
-                    ['id', 'DESC']
-                ],
-                limit,
-                offset
-            })
+        const result = await listQuery(
+            req.query,
+            RECORDS_LIST_SCHEMA,
+            ({ where, order, limit, offset }) =>
+                Record.findAndCountAll({
+                    attributes: LIST_ATTRIBUTES,
+                    where,
+                    order,
+                    limit,
+                    offset
+                })
         );
+
+        if (result.error) {
+            return res.status(result.status ?? 400).json({ error: result.error });
+        }
 
         result.items = result.items.map(row => {
             const plain = row.get ? row.get({ plain: true }) : row;
