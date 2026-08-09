@@ -43,7 +43,7 @@ const RECORDS_LIST_SCHEMA = {
     searchable: ['domain', 'source'],
     filterable: ['id', 'domain', 'enabled', 'source', 'hits'],
     sortable: ['id', 'domain', 'enabled', 'source', 'hits', 'last_hit', 'created_at', 'updated_at'],
-    defaultSort: ['updated_at', 'DESC'],
+    defaultSort: ['id', 'ASC'],
     fieldTypes: {
         id: 'number',
         enabled: 'boolean',
