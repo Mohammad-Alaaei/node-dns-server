@@ -16,15 +16,21 @@ export function forwardToExternalDns(message, server) {
     return new Promise((resolve, reject) => {
 
         const client = dgram.createSocket('udp4');
+        
         const timeout = setTimeout(async () => {
             client.close();
-            await dnsMonitor.timeout(server.ip);
-            await saveLookupStatus(
-                request.questions[0].name,
-                server.id,
-                DNS_TYPES[request.questions[0].type],
-                RECORD_STATUS.TIMEOUT
-            );
+            try {
+                await dnsMonitor.timeout(server.ip);
+                await saveLookupStatus(
+                    request.questions[0].name,
+                    server.id,
+                    DNS_TYPES[request.questions[0].type],
+                    RECORD_STATUS.TIMEOUT
+                );
+            } catch (err) {
+                // log but still reject the DNS promise
+                console.error('saveLookupStatus failed on timeout', err);
+            }
             reject(new Error(`DNS query timed out (${server.ip})`));
         }, config.system.dns.timeout);
 

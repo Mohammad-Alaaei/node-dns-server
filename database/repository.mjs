@@ -285,14 +285,15 @@ async function upsertRecordValue(
     selected = false
 ) {
     const now = Date.now();
+    const serverId = dnsServerId ?? null;
 
-    const existing = await RecordValue.findOne({
-        where: {
-            record_id: recordId,
-            dns_server_id: dnsServerId ?? null,
-            type
-        }
-    });
+    const lookup = {
+        record_id: recordId,
+        dns_server_id: serverId,
+        type
+    };
+
+    let existing = await RecordValue.findOne({ where: lookup });
 
     let ttl = existing?.ttl ?? null;
     let expiresAt = existing?.expires_at ?? null;
@@ -324,7 +325,6 @@ async function upsertRecordValue(
         selectedValue = !!selected;
     }
     else if (status === RECORD_STATUS.FILTERED) {
-        // Keep previous cached payload; mark FILTERED + stale.
         if (existing?.value != null) {
             value = existing.value;
             ttl = existing.ttl;
@@ -367,13 +367,25 @@ async function upsertRecordValue(
         return;
     }
 
-    await RecordValue.create({
-        record_id: recordId,
-        dns_server_id: dnsServerId ?? null,
-        type,
-        ...payload,
-        created_at: now
-    });
+    try {
+        await RecordValue.create({
+            record_id: recordId,
+            dns_server_id: serverId,
+            type,
+            ...payload,
+            created_at: now
+        });
+    } catch (err) {
+        // Concurrent insert won the race — update that row instead
+        if (err.name === 'SequelizeUniqueConstraintError') {
+            existing = await RecordValue.findOne({ where: lookup });
+            if (existing) {
+                await existing.update(payload);
+                return;
+            }
+        }
+        throw err;
+    }
 }
 
 async function clearSelected(recordId, type) {
