@@ -24,7 +24,7 @@ function getRecord(records, domain) {
 
 function packetHasFilterIp(packet) {
     // Build from live config — do NOT freeze at module load
-    const filterIps = new Set(config.cache.filterIps);
+    const filterIps = new Set(config.system.cache.filterIps);
     if (filterIps.size === 0) {
         return false;
     }
@@ -97,7 +97,7 @@ function handleUpstreamResponse(
 
     const { process, doLog } = evaluateUpstreamHandling(packet, isCustom);
     const records = new Map();
-    const expireMs = config.cache.expireTime * 1000;
+    const expireMs = config.system.cache.expireTime * 1000;
     const now = Date.now();
 
     for (const answer of packet.answers) {

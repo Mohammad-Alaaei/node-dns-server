@@ -23,21 +23,21 @@ const TYPE_AAAA = 28;
 const TYPE_CNAME = 5;
 
 const ORIGINAL = {
-    level: config.cache.level,
-    filterIps: [...config.cache.filterIps],
-    ignoreIps: [...config.ignoreIps]
+    level: config.system.cache.level,
+    filterIps: [...config.system.cache.filterIps],
+    ignoreIps: [...config.system.ignoreIps]
 };
 
 function setLevel(level) {
-    config.cache.level = level;
+    config.system.cache.level = level;
 }
 
 function setFilterIps(ips) {
-    config.cache.filterIps = [...ips];
+    config.system.cache.filterIps = [...ips];
 }
 
 function setIgnoreIps(ips) {
-    config.ignoreIps = [...ips];
+    config.system.ignoreIps = [...ips];
 }
 
 function makePacket(addresses = [], { cname } = {}) {
