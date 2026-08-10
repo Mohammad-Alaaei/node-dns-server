@@ -1,8 +1,6 @@
 import dgram from 'node:dgram';
 
-import { close as closeDatabase } from "../database/connection.mjs";
 import * as logger from '../utils/logger.mjs';
-import * as cacheService from '../services/cache_service.mjs';
 import { handleRequest } from './request_router.mjs';
 
 let server = null;
@@ -18,7 +16,6 @@ async function startServer(ip, port) {
     server = dgram.createSocket('udp4');
 
     server.on('message', (message, remote) => {
-
         if (shuttingDown) {
             return;
         }
@@ -34,9 +31,14 @@ async function startServer(ip, port) {
         logger.error(err);
     });
 
-    server.bind(port, ip, () => {
-        logger.info(`DNS server listening on ${ip}:${port}`);
-        logger.info('------------------------------------------------')
+    await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.bind(port, ip, () => {
+            server.removeListener('error', reject);
+            logger.info(`DNS server listening on ${ip}:${port}`);
+            logger.info('------------------------------------------------');
+            resolve();
+        });
     });
 }
 
@@ -50,7 +52,6 @@ async function startServer(ip, port) {
  * }} response
  */
 function sendResponse(remote, response) {
-
     if (shuttingDown || !server) {
         return;
     }
@@ -62,7 +63,6 @@ function sendResponse(remote, response) {
                 remote.port,
                 remote.address
             );
-
             return;
         }
 
@@ -71,7 +71,6 @@ function sendResponse(remote, response) {
             remote.port,
             remote.address
         );
-
     } catch (err) {
         if (err.code !== 'ERR_SOCKET_DGRAM_NOT_RUNNING') {
             throw err;
@@ -79,52 +78,47 @@ function sendResponse(remote, response) {
     }
 }
 
-
-async function shutdown(signal) {
-
+/**
+ * Graceful DNS server stop:
+ * 1. Reject new requests
+ * 2. Drain in-flight handlers
+ * 3. Close the UDP socket
+ */
+async function stopServer() {
     if (shuttingDown) {
         return;
     }
 
     shuttingDown = true;
+    logger.info('Stopping DNS server…');
 
-    logger.info(`${signal} received. Shutting down...`);
-
-    try {
-
-        await Promise.allSettled(activeRequests);
-
-        await cacheService.shutdown();
-
-        await new Promise(resolve => server.close(resolve));
-
-        await logger.shutdown();
-
-    } catch (err) {
-        console.error('Error during shutdown.', err);
-    } finally {
-        await closeDatabase();
-        process.exit(0);
+    // Let in-flight request handlers finish
+    if (activeRequests.size > 0) {
+        logger.info(`Waiting for ${activeRequests.size} active DNS request(s)…`);
+        await Promise.allSettled([...activeRequests]);
     }
+
+    if (server) {
+        await new Promise(resolve => {
+            server.close(() => resolve());
+        });
+        server = null;
+    }
+
+    logger.info('DNS server stopped');
 }
 
-process.once('SIGINT', () => {
-    void shutdown('SIGINT');
-});
-
-process.once('SIGTERM', () => {
-    void shutdown('SIGTERM');
-});
-
-process.on('uncaughtException', async err => {
+// Keep process-level error logging here (not signal handlers)
+process.on('uncaughtException', err => {
     logger.error('[uncaughtException]', err);
 });
 
-process.on('unhandledRejection', async err => {
+process.on('unhandledRejection', err => {
     logger.error('[unhandledRejection]', err);
 });
 
 export {
     startServer,
+    stopServer,
     sendResponse
-}
+};

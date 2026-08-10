@@ -78,9 +78,25 @@ export async function startApi() {
 export async function stopApi() {
     if (!server) return;
 
+    const httpServer = server;
+    server = null;
+
+    // Prefer forcing idle connections closed when available (Node 18.2+)
+    if (typeof httpServer.closeAllConnections === 'function') {
+        httpServer.closeAllConnections();
+    }
+
     await new Promise((resolve) => {
-        server.close(() => resolve());
+        const timer = setTimeout(() => {
+            logger.warn('API close timed out; continuing shutdown');
+            resolve();
+        }, 3000);
+
+        httpServer.close(() => {
+            clearTimeout(timer);
+            resolve();
+        });
     });
 
-    server = null;
+    logger.info('API stopped');
 }

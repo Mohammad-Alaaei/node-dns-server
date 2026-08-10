@@ -232,13 +232,16 @@ export async function init() {
 }
 
 export async function shutdown() {
-
     clearInterval(flushTimer);
 
+    // One final flush. If saveRecord fails and re-queues items,
+    // do not loop forever during process exit.
     await flushCache();
 
-    while (pendingCache.size > 0) {
-        await flushCache();
+    if (pendingCache.size > 0) {
+        logger.warn(
+            `Cache shutdown: ${pendingCache.size} record(s) still pending after flush; discarding`
+        );
+        pendingCache.clear();
     }
-
 }
