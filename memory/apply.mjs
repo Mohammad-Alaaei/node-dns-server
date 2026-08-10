@@ -1,5 +1,5 @@
 import { store } from './store.mjs';
-import { DNS_SERVER_TYPE } from '../config/constants.mjs';
+import { DNS_SERVER_TYPE, RECORD_STATUS } from '../config/constants.mjs';
 
 /**
  * Surgical in-memory updates so CRUD does not need a full store rebuild.
@@ -241,4 +241,137 @@ export function memoryCounts() {
         defaultDnsServers: store.defaultDnsServers.length,
         customDnsServers: store.customDnsServers.length
     };
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     Full record replace / remove (CRUD)                      */
+/* -------------------------------------------------------------------------- */
+
+
+/**
+ * Remove a memory record by DB id from both exact and regex collections.
+ */
+export function applyRecordRemoveById(id) {
+    for (const [domain, record] of store.exactRecords.entries()) {
+        if (record.id === id) {
+            store.exactRecords.delete(domain);
+        }
+    }
+
+    for (let i = store.regexRecords.length - 1; i >= 0; i--) {
+        if (store.regexRecords[i].id === id) {
+            store.regexRecords.splice(i, 1);
+        }
+    }
+}
+
+/**
+ * Rebuild one in-memory record from a DB row + its values.
+ * `row` plain: { id, domain, enabled, is_regex, source, hits, last_hit, created_at, updated_at, values?: [...] }
+ */
+export function applyRecordReplace(row) {
+    if (!row?.id) {
+        return;
+    }
+
+    applyRecordRemoveById(row.id);
+
+    if (row.enabled === false && row.source !== 'LOCAL') {
+        // disabled non-LOCAL still kept? loadRecords keeps enabled OR LOCAL.
+        // Match loadRecords: skip disabled non-LOCAL
+        // Actually load keeps LOCAL even if disabled. For non-LOCAL disabled, omit.
+    }
+
+    // Match loadRecords: keep LOCAL always; skip disabled non-LOCAL
+    if (row.source !== 'LOCAL' && row.enabled === false) {
+        return;
+    }
+
+    const record = {
+        id: row.id,
+        domain: row.domain,
+        enabled: !!row.enabled,
+        isRegex: !!row.is_regex,
+        source: row.source,
+        servers: [],
+        hits: row.hits ?? 0,
+        lastHit: row.last_hit ?? null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+    };
+
+    const values = row.values ?? [];
+
+    for (const rv of values) {
+        if (
+            rv.status !== RECORD_STATUS.SUCCESS &&
+            rv.status !== RECORD_STATUS.FILTERED &&
+            rv.status !== 'SUCCESS' &&
+            rv.status !== 'FILTERED'
+        ) {
+            continue;
+        }
+
+        let parsed = [];
+        try {
+            if (typeof rv.value === 'string') {
+                parsed = JSON.parse(rv.value || '[]');
+            } else if (Array.isArray(rv.value)) {
+                parsed = rv.value;
+            }
+        } catch {
+            continue;
+        }
+
+        if (!parsed.length) {
+            continue;
+        }
+
+        let server = record.servers.find(
+            s => s.dnsServerId === (rv.dns_server_id ?? null)
+        );
+
+        if (!server) {
+            server = {
+                dnsServerId: rv.dns_server_id ?? null,
+                selected: !!rv.selected,
+                status: rv.status,
+                isStale: !!rv.is_stale,
+                lastSuccessAt: rv.last_success_at,
+                A: [],
+                AAAA: [],
+                CNAME: []
+            };
+            record.servers.push(server);
+        }
+
+        const mapped = parsed.map(item => {
+            if (rv.type === 'CNAME') {
+                return {
+                    name: record.domain,
+                    domain: typeof item === 'string' ? item : item?.domain,
+                    ttl: rv.ttl,
+                    expiresAt: rv.expires_at
+                };
+            }
+            return {
+                name: record.domain,
+                address: typeof item === 'string' ? item : item?.address,
+                ttl: rv.ttl,
+                expiresAt: rv.expires_at
+            };
+        });
+
+        if (rv.type === 'A') server.A.push(...mapped);
+        else if (rv.type === 'AAAA') server.AAAA.push(...mapped);
+        else if (rv.type === 'CNAME') server.CNAME.push(...mapped);
+    }
+
+    if (record.isRegex) {
+        record.regex = new RegExp(`^(?:${row.domain})$`, 'i');
+        store.regexRecords.push(record);
+        store.regexRecords.sort((a, b) => b.domain.length - a.domain.length);
+    } else {
+        store.exactRecords.set(row.domain, record);
+    }
 }

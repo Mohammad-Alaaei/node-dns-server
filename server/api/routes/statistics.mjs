@@ -1,11 +1,13 @@
 import { Router } from 'express';
-import { fn, col, literal } from 'sequelize';
+import { fn, col, literal, Op } from 'sequelize';
 import { Record, DnsServer } from '../../../database/models/index.mjs';
 import { RECORD_SOURCE, DNS_SERVER_TYPE } from '../../../config/constants.mjs';
 import * as cacheService from '../../../services/cache_service.mjs';
-import { memoryCounts } from '../../../memory/apply.mjs';
+import { memoryCounts, applyRecordPatchByIds } from '../../../memory/apply.mjs';
+import { store } from '../../../memory/store.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
 import { listQuery } from '../utils/list_query.mjs';
+import * as logger from '../../../utils/logger.mjs';
 
 const router = Router();
 
@@ -274,5 +276,167 @@ router.get('/top-records', async (req, res, next) => {
         return next(err);
     }
 });
+
+
+function normalizeIdList(ids) {
+    if (!Array.isArray(ids)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const x of ids) {
+        const n = Number(x);
+        if (!Number.isFinite(n) || n < 1 || seen.has(n)) continue;
+        seen.add(n);
+        out.push(n);
+    }
+    return out;
+}
+
+/**
+ * POST /api/statistics/reset/servers
+ * Body: { ids?: number[] } — omit or empty = all servers
+ * Resets successes, failures, timeouts, average_latency.
+ * superadmin only.
+ */
+router.post(
+    '/reset/servers',
+    requireRole('superadmin'),
+    async (req, res, next) => {
+        try {
+            const idList = normalizeIdList(req.body?.ids);
+            const where = idList.length ? { id: { [Op.in]: idList } } : {};
+
+            const [affected] = await DnsServer.update(
+                {
+                    successes: 0,
+                    failures: 0,
+                    timeouts: 0,
+                    average_latency: 0
+                },
+                { where }
+            );
+
+            const who = req.user?.username ?? req.user?.id ?? 'unknown';
+            logger.info(
+                `[RESET] user=${who} action=reset_server_stats target=${idList.length ? idList.join(',') : 'ALL'} updated=${affected}`
+            );
+
+            return res.json({
+                ok: true,
+                scope: idList.length ? 'selected' : 'all',
+                requested: idList.length || null,
+                updated: affected
+            });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+/**
+ * POST /api/statistics/reset/records
+ * Body: { ids?: number[] } — omit or empty = all records
+ * Resets hits, last_hit (does not delete cache rows).
+ * superadmin only.
+ */
+router.post(
+    '/reset/records',
+    requireRole('superadmin'),
+    async (req, res, next) => {
+        try {
+            const idList = normalizeIdList(req.body?.ids);
+            const where = idList.length ? { id: { [Op.in]: idList } } : {};
+
+            const [affected] = await Record.update(
+                {
+                    hits: 0,
+                    last_hit: null
+                },
+                { where }
+            );
+
+            // memory hits
+            if (idList.length) {
+                applyRecordPatchByIds(idList, { hits: 0, lastHit: null });
+            } else {
+                // patch all in memory
+                for (const r of store.exactRecords.values()) {
+                    r.hits = 0;
+                    r.lastHit = null;
+                }
+                for (const r of store.regexRecords) {
+                    r.hits = 0;
+                    r.lastHit = null;
+                }
+            }
+
+            const who = req.user?.username ?? req.user?.id ?? 'unknown';
+            logger.info(
+                `[RESET] user=${who} action=reset_record_stats target=${idList.length ? idList.join(',') : 'ALL'} updated=${affected}`
+            );
+
+            return res.json({
+                ok: true,
+                scope: idList.length ? 'selected' : 'all',
+                requested: idList.length || null,
+                updated: affected
+            });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+/**
+ * POST /api/statistics/reset/all
+ * Resets all server counters + all record hits. superadmin only.
+ */
+router.post(
+    '/reset/all',
+    requireRole('superadmin'),
+    async (req, res, next) => {
+        try {
+            const [serversUpdated] = await DnsServer.update(
+                {
+                    successes: 0,
+                    failures: 0,
+                    timeouts: 0,
+                    average_latency: 0
+                },
+                { where: {} }
+            );
+
+            const [recordsUpdated] = await Record.update(
+                {
+                    hits: 0,
+                    last_hit: null
+                },
+                { where: {} }
+            );
+
+            for (const r of store.exactRecords.values()) {
+                r.hits = 0;
+                r.lastHit = null;
+            }
+            for (const r of store.regexRecords) {
+                r.hits = 0;
+                r.lastHit = null;
+            }
+
+            const who = req.user?.username ?? req.user?.id ?? 'unknown';
+            logger.info(
+                `[RESET] user=${who} action=reset_all_stats servers=${serversUpdated} records=${recordsUpdated}`
+            );
+
+            return res.json({
+                ok: true,
+                serversUpdated,
+                recordsUpdated
+            });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
 
 export default router;

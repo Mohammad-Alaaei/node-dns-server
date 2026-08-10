@@ -1,11 +1,16 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
 import { Record, RecordValue, DnsServer } from '../../../database/models/index.mjs';
-import { RECORD_SOURCE } from '../../../config/constants.mjs';
-import { normalizeDomain } from '../../../utils/domain_utils.mjs';
-import { applyRecordPatchByIds } from '../../../memory/apply.mjs';
+import { RECORD_SOURCE, RECORD_STATUS } from '../../../config/constants.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
 import { listQuery } from '../utils/list_query.mjs';
+import { sendSequelizeError } from '../utils/http_errors.mjs';
+import { normalizeDomain, prepareRuleDomain } from '../../../utils/domain_utils.mjs';
+import {
+    applyRecordPatchByIds,
+    applyRecordReplace,
+    applyRecordRemoveById
+} from '../../../memory/apply.mjs';
 
 const router = Router();
 
@@ -187,6 +192,448 @@ router.post(
  * Full record + all record_values (every status).
  * If any value is CNAME, recursively include those domains' records + values.
  */
+
+/**
+ * POST /api/records/demote
+ * Body: { ids: number[] }
+ * LOCAL → CACHE (bulk). Does not touch record_values.
+ */
+router.post('/demote',
+    requireRole('superadmin', 'admin'),
+    async (req, res, next) => {
+        try {
+            const idList = normalizeIdList(req.body?.ids);
+            if (!idList.length) {
+                return res.status(400).json({ error: 'ids must be a non-empty array of numbers' });
+            }
+
+            const now = Date.now();
+            const [affected] = await Record.update(
+                {
+                    source: RECORD_SOURCE.CACHE,
+                    updated_at: now
+                },
+                {
+                    where: {
+                        id: { [Op.in]: idList },
+                        source: RECORD_SOURCE.LOCAL
+                    }
+                }
+            );
+
+            applyRecordPatchByIds(idList, {
+                source: RECORD_SOURCE.CACHE,
+                updatedAt: now
+            });
+
+            return res.json({
+                ok: true,
+                requested: idList.length,
+                demoted: affected
+            });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+const VALUE_TYPES = new Set(['A', 'AAAA', 'CNAME']);
+
+function encodeRecordValue(type, value) {
+    if (!Array.isArray(value) || value.length === 0) {
+        return { error: 'value must be a non-empty array' };
+    }
+    if (type === 'A' || type === 'AAAA') {
+        const addrs = value.map(v => (typeof v === 'string' ? v : v?.address)).filter(Boolean);
+        if (!addrs.length) return { error: 'value must contain addresses' };
+        return { json: JSON.stringify(addrs) };
+    }
+    if (type === 'CNAME') {
+        const domains = value.map(v => (typeof v === 'string' ? v : v?.domain)).filter(Boolean);
+        if (!domains.length) return { error: 'value must contain domains' };
+        return { json: JSON.stringify(domains) };
+    }
+    return { error: `unsupported type: ${type}` };
+}
+
+async function loadRecordWithValues(id) {
+    return Record.findByPk(id, {
+        include: [
+            {
+                model: RecordValue,
+                as: 'values',
+                required: false
+            }
+        ]
+    });
+}
+
+async function syncRecordMemory(id) {
+    const row = await loadRecordWithValues(id);
+    if (!row) {
+        applyRecordRemoveById(id);
+        return null;
+    }
+    applyRecordReplace(row.get({ plain: true }));
+    return row;
+}
+
+/**
+ * POST /api/records
+ * Create LOCAL record. Body: { domain, enabled?, values?: [{ type, value, ttl?, dns_server_id? }] }
+ */
+router.post('/',
+    requireRole('superadmin', 'admin'),
+    async (req, res, next) => {
+        try {
+            const prepared = prepareRuleDomain(req.body?.domain);
+            if (prepared.error) {
+                return res.status(400).json({ error: prepared.error });
+            }
+
+            const now = Date.now();
+            const enabled = req.body?.enabled === undefined ? true : !!req.body.enabled;
+
+            let created;
+            try {
+                created = await Record.create({
+                    domain: prepared.domain,
+                    enabled,
+                    is_regex: prepared.is_regex,
+                    source: RECORD_SOURCE.LOCAL,
+                    hits: 0,
+                    last_hit: null,
+                    created_at: now,
+                    updated_at: now
+                });
+            } catch (err) {
+                const handled = sendSequelizeError(res, err);
+                if (handled) return handled;
+                throw err;
+            }
+
+            const rawValues = Array.isArray(req.body?.values) ? req.body.values : [];
+            for (const item of rawValues) {
+                const type = String(item?.type ?? '').toUpperCase();
+                if (!VALUE_TYPES.has(type)) {
+                    await created.destroy();
+                    return res.status(400).json({ error: `invalid value type: ${type}` });
+                }
+                const enc = encodeRecordValue(type, item.value);
+                if (enc.error) {
+                    await created.destroy();
+                    return res.status(400).json({ error: enc.error });
+                }
+                try {
+                    await RecordValue.create({
+                        record_id: created.id,
+                        dns_server_id: item.dns_server_id ?? null,
+                        type,
+                        status: RECORD_STATUS.SUCCESS,
+                        value: enc.json,
+                        ttl: item.ttl ?? null,
+                        selected: item.selected !== false,
+                        is_stale: false,
+                        last_success_at: now,
+                        expires_at: null,
+                        created_at: now,
+                        updated_at: now
+                    });
+                } catch (err) {
+                    await created.destroy();
+                    const handled = sendSequelizeError(res, err);
+                    if (handled) return handled;
+                    throw err;
+                }
+            }
+
+            const full = await syncRecordMemory(created.id);
+            return res.status(201).json({
+                record: serializeRecordDetail(full)
+            });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+/**
+ * PATCH /api/records/:id
+ * Body: { domain?, enabled? } — source via promote/demote only.
+ */
+router.patch('/:id',
+    requireRole('superadmin', 'admin'),
+    async (req, res, next) => {
+        try {
+            const id = Number.parseInt(String(req.params.id), 10);
+            if (!Number.isFinite(id) || id < 1) {
+                return res.status(400).json({ error: 'invalid id' });
+            }
+
+            const record = await Record.findByPk(id);
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found' });
+            }
+
+            const updates = { updated_at: Date.now() };
+
+            if (req.body?.domain !== undefined) {
+                const prepared = prepareRuleDomain(req.body.domain);
+                if (prepared.error) {
+                    return res.status(400).json({ error: prepared.error });
+                }
+                updates.domain = prepared.domain;
+                updates.is_regex = prepared.is_regex;
+            }
+
+            if (req.body?.enabled !== undefined) {
+                updates.enabled = !!req.body.enabled;
+            }
+
+            try {
+                await record.update(updates);
+            } catch (err) {
+                const handled = sendSequelizeError(res, err);
+                if (handled) return handled;
+                throw err;
+            }
+
+            const full = await syncRecordMemory(id);
+            return res.json({ record: serializeRecordDetail(full) });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+/**
+ * DELETE /api/records/:id
+ */
+router.delete('/:id',
+    requireRole('superadmin', 'admin'),
+    async (req, res, next) => {
+        try {
+            const id = Number.parseInt(String(req.params.id), 10);
+            if (!Number.isFinite(id) || id < 1) {
+                return res.status(400).json({ error: 'invalid id' });
+            }
+
+            const record = await Record.findByPk(id);
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found' });
+            }
+
+            // values cascade if FK on delete; otherwise explicit
+            await RecordValue.destroy({ where: { record_id: id } });
+            await record.destroy();
+            applyRecordRemoveById(id);
+
+            return res.json({ ok: true, id });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+/**
+ * POST /api/records/:id/values
+ * Body: { type, value, ttl?, dns_server_id?, selected? }
+ */
+router.post('/:id/values',
+    requireRole('superadmin', 'admin'),
+    async (req, res, next) => {
+        try {
+            const id = Number.parseInt(String(req.params.id), 10);
+            if (!Number.isFinite(id) || id < 1) {
+                return res.status(400).json({ error: 'invalid id' });
+            }
+
+            const record = await Record.findByPk(id);
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found' });
+            }
+
+            const type = String(req.body?.type ?? '').toUpperCase();
+            if (!VALUE_TYPES.has(type)) {
+                return res.status(400).json({ error: `type must be one of: ${[...VALUE_TYPES].join(', ')}` });
+            }
+
+            const enc = encodeRecordValue(type, req.body?.value);
+            if (enc.error) {
+                return res.status(400).json({ error: enc.error });
+            }
+
+            const now = Date.now();
+            let row;
+            try {
+                row = await RecordValue.create({
+                    record_id: id,
+                    dns_server_id: req.body?.dns_server_id ?? null,
+                    type,
+                    status: RECORD_STATUS.SUCCESS,
+                    value: enc.json,
+                    ttl: req.body?.ttl ?? null,
+                    selected: req.body?.selected !== false,
+                    is_stale: false,
+                    last_success_at: now,
+                    expires_at: null,
+                    created_at: now,
+                    updated_at: now
+                });
+            } catch (err) {
+                const handled = sendSequelizeError(res, err);
+                if (handled) return handled;
+                throw err;
+            }
+
+            await record.update({ updated_at: now });
+            await syncRecordMemory(id);
+
+            return res.status(201).json({
+                value: {
+                    id: row.id,
+                    record_id: row.record_id,
+                    dns_server_id: row.dns_server_id,
+                    type: row.type,
+                    status: row.status,
+                    value: parseJsonValue(row.value),
+                    ttl: row.ttl,
+                    selected: !!row.selected,
+                    is_stale: !!row.is_stale,
+                    expires_at: row.expires_at
+                }
+            });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+/**
+ * PATCH /api/records/:id/values/:valueId
+ * Body: { value?, ttl?, selected?, dns_server_id?, type? }
+ * Unique (record_id, dns_server_id, type) enforced by DB.
+ */
+router.patch('/:id/values/:valueId',
+    requireRole('superadmin', 'admin'),
+    async (req, res, next) => {
+        try {
+            const id = Number.parseInt(String(req.params.id), 10);
+            const valueId = Number.parseInt(String(req.params.valueId), 10);
+            if (!Number.isFinite(id) || id < 1 || !Number.isFinite(valueId) || valueId < 1) {
+                return res.status(400).json({ error: 'invalid id' });
+            }
+
+            const row = await RecordValue.findOne({
+                where: { id: valueId, record_id: id }
+            });
+            if (!row) {
+                return res.status(404).json({ error: 'Record value not found' });
+            }
+
+            const updates = { updated_at: Date.now() };
+
+            if (req.body?.type !== undefined) {
+                const type = String(req.body.type).toUpperCase();
+                if (!VALUE_TYPES.has(type)) {
+                    return res.status(400).json({ error: `invalid type: ${type}` });
+                }
+                updates.type = type;
+            }
+
+            if (req.body?.dns_server_id !== undefined) {
+                updates.dns_server_id = req.body.dns_server_id;
+            }
+
+            if (req.body?.value !== undefined) {
+                const type = updates.type ?? row.type;
+                const enc = encodeRecordValue(type, req.body.value);
+                if (enc.error) {
+                    return res.status(400).json({ error: enc.error });
+                }
+                updates.value = enc.json;
+                updates.status = RECORD_STATUS.SUCCESS;
+                updates.is_stale = false;
+                updates.last_success_at = Date.now();
+            }
+
+            if (req.body?.ttl !== undefined) {
+                updates.ttl = req.body.ttl;
+            }
+
+            if (req.body?.selected !== undefined) {
+                updates.selected = !!req.body.selected;
+            }
+
+            try {
+                await row.update(updates);
+            } catch (err) {
+                const handled = sendSequelizeError(res, err);
+                if (handled) return handled;
+                throw err;
+            }
+
+            await Record.update(
+                { updated_at: Date.now() },
+                { where: { id } }
+            );
+            await syncRecordMemory(id);
+
+            await row.reload();
+            return res.json({
+                value: {
+                    id: row.id,
+                    record_id: row.record_id,
+                    dns_server_id: row.dns_server_id,
+                    type: row.type,
+                    status: row.status,
+                    value: parseJsonValue(row.value),
+                    ttl: row.ttl,
+                    selected: !!row.selected,
+                    is_stale: !!row.is_stale,
+                    expires_at: row.expires_at
+                }
+            });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+/**
+ * DELETE /api/records/:id/values/:valueId
+ */
+router.delete('/:id/values/:valueId',
+    requireRole('superadmin', 'admin'),
+    async (req, res, next) => {
+        try {
+            const id = Number.parseInt(String(req.params.id), 10);
+            const valueId = Number.parseInt(String(req.params.valueId), 10);
+            if (!Number.isFinite(id) || id < 1 || !Number.isFinite(valueId) || valueId < 1) {
+                return res.status(400).json({ error: 'invalid id' });
+            }
+
+            const deleted = await RecordValue.destroy({
+                where: { id: valueId, record_id: id }
+            });
+            if (!deleted) {
+                return res.status(404).json({ error: 'Record value not found' });
+            }
+
+            await Record.update(
+                { updated_at: Date.now() },
+                { where: { id } }
+            );
+            await syncRecordMemory(id);
+
+            return res.json({ ok: true, id: valueId });
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
+
 router.get('/:id', async (req, res, next) => {
     try {
         const id = Number.parseInt(String(req.params.id), 10);
