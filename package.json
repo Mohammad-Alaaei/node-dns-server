@@ -1,6 +1,6 @@
 {
   "name": "simple_dns_server",
-  "version": "3.2.3",
+  "version": "3.3.0",
   "main": "main.mjs",
   "type": "module",
   "scripts": {
