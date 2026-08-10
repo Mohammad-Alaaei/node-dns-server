@@ -1,5 +1,4 @@
 import { Packet } from 'dns2';
-import { config } from '../config/config.mjs';
 
 import * as logger from '../utils/logger.mjs';
 import { sendResponse } from './dns_server.mjs';
@@ -11,9 +10,7 @@ import { handleOtherRequest } from '../records/other_records.mjs';
 import { DNS_TYPES } from '../config/constants.mjs';
 import { handleCNAMERequest } from '../records/cname_record.mjs';
 import { normalizeDomain } from '../utils/domain_utils.mjs';
-
-const DEBUG_PREFIX = config.server.debugPrefix;
-
+import { getDebugPrefix } from '../config/runtime_settings.mjs';
 
 /**
  * Handles a DNS request.
@@ -35,14 +32,19 @@ export async function handleRequest(message, remote) {
         let debug = false;
         let domain = question.name;
 
-        if (domain.startsWith(DEBUG_PREFIX)) {
+        // Read at request time so settings DB changes apply without restart
+        const debugPrefix = getDebugPrefix() || '_.';
+
+        if (debugPrefix && domain.startsWith(debugPrefix)) {
             debug = true;
-            domain = domain.substring(DEBUG_PREFIX.length);
+            domain = domain.substring(debugPrefix.length);
         }
 
         domain = normalizeDomain(domain);
 
-        logger.info(`Requested for: ${domain} (${DNS_TYPES[question.type] ?? question.type})`);
+        logger.info(
+            `Requested for: ${domain} (${DNS_TYPES[question.type] ?? question.type})${debug ? ' [debug]' : ''}`
+        );
 
         let response;
 
@@ -64,7 +66,12 @@ export async function handleRequest(message, remote) {
                 break;
 
             default:
-                response = await handleOtherRequest(request, message, domain, DNS_TYPES[question.type] ?? String(question.type));
+                response = await handleOtherRequest(
+                    request,
+                    message,
+                    domain,
+                    DNS_TYPES[question.type] ?? String(question.type)
+                );
                 break;
         }
 
