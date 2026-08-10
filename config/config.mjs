@@ -72,6 +72,14 @@ export const config = {
         }
     },
 
+    log: {
+        dir: process.env.LOG_DIR ?? './logs',
+        flushInterval: Number(process.env.LOG_FLUSH_INTERVAL ?? 5000),
+        maxBufferSize: Number(process.env.LOG_MAX_BUFFER_SIZE ?? 100),
+        /** Max log file size in kilobytes before rotation (default 10 MB). */
+        maxSizeKb: Number(process.env.LOG_MAX_SIZE_KB ?? 10240)
+    },
+
     db: {
         host: process.env.DB_HOST ?? '127.0.0.1',
         port: Number(process.env.DB_PORT ?? 3306),

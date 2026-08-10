@@ -4,7 +4,8 @@ import path from 'node:path';
 import {
     flush as flushLogger,
     getLogDir,
-    getSessionLogFile
+    getSessionLogFile,
+    rotate as rotateLogger
 } from '../../../utils/logger.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
 import { paginateArray, parsePagination } from '../utils/pagination.mjs';
@@ -74,6 +75,29 @@ router.get('/', async (req, res, next) => {
  *
  * Current session file: flushes in-memory buffer before read.
  */
+
+/**
+ * POST /api/logs/rotate
+ * Force a new log file. Flushes pending buffer to the old file first.
+ * superadmin only.
+ */
+router.post(
+    '/rotate',
+    requireRole('superadmin'),
+    async (req, res, next) => {
+        try {
+            const who = req.user?.username ?? req.user?.id ?? 'unknown';
+            const result = await rotateLogger(`manual by ${who}`);
+            if (!result.ok) {
+                return res.status(409).json({ error: result.error });
+            }
+            return res.json(result);
+        } catch (err) {
+            return next(err);
+        }
+    }
+);
+
 router.get('/:filename', async (req, res, next) => {
     try {
         const filename = req.params.filename;
