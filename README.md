@@ -1,103 +1,150 @@
-# What is this?
+```markdown
+# node-dns-server
 
-This is a simple DNS server made with Node.js.
+Custom DNS server written in Node.js.
 
-It allows you to define custom IP addresses for domains, manage domains resolved through custom DNS servers, and cache DNS records.
+It receives DNS requests and decides what to do with them:
 
-The application uses MySQL as its database and Sequelize as its ORM.
+1. Override domains with static IPs
+2. Route specific domains to custom upstream DNS servers
+3. Cache answers (with configurable levels: `ALL`, `CUSTOM_ONLY`, `FILTERED_ONLY`, `NONE`), track hits/latency, mark “filtered” answers, and persist everything in MySQL.
 
-## Quick Setup
+## Architecture notes
 
-### 1. Install Node.js
+- Clean separation of concerns, graceful shutdown, latency tracking per upstream
+- Regex + exact matching (longer regexes preferred)
+- Debug mode via `_.` prefix
+- TTL/expiry handling and “selected”/stale server logic
+- Cache flush is periodic and merges answers
+- HTTP API with JWT + refresh tokens and RSA-OAEP login encryption
 
-Install Node.js on your system.
+## Requirements
 
-### 2. Install dependencies
+- Node.js 18+ (22 recommended)
+- MySQL 8
+- npm
 
-```cmd
+---
+
+## Local development setup
+
+### 1. Install dependencies
+
+```bash
 npm install
 ```
 
-### 3. Setup MySQL
+### 2. Configure environment
 
-Install and configure a MySQL server on your system.
+```bash
+cp .env.example .env
+# edit DB_*, ADMIN_*, API_JWT_SECRET, etc.
+```
 
-Create a database user and make sure it has the required permissions to create and manage the application database.
+### 3. Initialize the database
 
-### 4. Configure the environment
-
-Update the `.env` file with your MySQL connection details.
-
-Make sure the database host, port, username, password, and database settings are correct.
-
-In particular, check the database username and password. If you are using the MySQL `root` user, make sure the `root` credentials in `.env` are correct.
-
-### 5. Initialize the database
-
-Run the following commands:
-
-```cmd
-npm run db:create
+```bash
+npm run db:create      # creates database + user (needs MYSQL_ROOT_* credentials)
 npm run db:migrate
 npm run db:seed
 ```
 
-These commands create the database, apply the database migrations, and add the default seed data.
+### 4. Run the server
 
-### 6. Run the server
-
-#### Windows
-
-```cmd
+```bash
 node main.mjs
+# or on Windows: run.bat
 ```
 
-Or execute:
+The DNS server listens on the configured `SERVER_IP`/`SERVER_PORT` (default `127.0.0.1:53`).  
+The HTTP API listens on `API_HOST`/`API_PORT` (default `127.0.0.1:3000`).
 
-```cmd
-run.bat
+---
+
+## Docker setup
+
+This repository ships a self-contained Docker setup that runs **MySQL + the DNS server + phpMyAdmin**.
+
+### Files
+
+```
+docker/
+  Dockerfile          # production image (node:22-alpine)
+  entrypoint.sh       # wait-for-db → migrate → seed-once → start
+docker-compose.yml    # backend + MySQL + phpMyAdmin
+.dockerignore
 ```
 
-#### Linux
+### Quick start
 
-```cmd
-node main.mjs
+```bash
+# from the root of this repository
+cp .env.example .env          # optional – edit secrets
+docker compose up -d --build
 ```
 
-## Configuration
+**Published ports**
 
-Application configuration is managed through environment variables.
+| Port   | Service     |
+| ------ | ----------- |
+| 53/udp | DNS         |
+| 3000   | HTTP API    |
+| 8080   | phpMyAdmin  |
 
-Create or update your `.env` file according to the available configuration options in `.env.example`.
+**Volumes** (persist across rebuilds)
 
-## Domain Management
+- `mysql_data` – database files
+- `backend_logs` – application logs
+- `backend_data` – seed marker (seeds run only once)
 
-DNS records are now managed through the database instead of the previous `domains.txt` and custom DNS server `.txt` files.
+### Behaviour on start
 
-Records can be configured with their domain, IP addresses, source, and enabled state.
+1. Wait until MySQL is healthy
+2. Run migrations (always)
+3. Run seeders **only on first boot** (controlled by a marker file in the `backend_data` volume)
+4. Start the DNS server + API
 
-The application supports different record sources, including:
+### Environment
 
-- `LOCAL` for manually configured records.
-- `CACHE` for records resolved and stored by the DNS server.
-- `FILTERED` for filtered records.
+All configuration is done via environment variables (see `.env.example`).  
+Important Docker-related values already set in `docker-compose.yml`:
 
-## DNS Resolution
+- `SERVER_IP=0.0.0.0` / `API_HOST=0.0.0.0` (listen on all interfaces inside the container)
+- `DB_HOST=db`
 
-When a requested domain does not have an applicable local record, the server can resolve it through the configured DNS servers.
+### Rebuild / update
 
-Resolved records are stored in the database and can be served from the cache until they expire.
+```bash
+docker compose up -d --build
+```
 
-The server also supports CNAME records.
+Logs and the seed marker survive the rebuild.  
+To wipe everything (including the database):
 
-## Requirements
+```bash
+docker compose down -v
+```
 
-- Node.js
-- MySQL
-- npm
+---
 
-## Running the Server
+## Configuration reference
 
-The DNS server listens on the configured IP address and port.
+See `.env.example` for the full list. Key groups:
 
-Make sure the configured port is available and that the application has the required permissions to use it.
+| Group        | Purpose                             |
+| ------------ | ----------------------------------- |
+| `SERVER_*`   | DNS bind address / port             |
+| `DB_*`       | MySQL connection                    |
+| `API_*`      | HTTP API bind, JWT, CORS, RSA keys  |
+| `ADMIN_*`    | Bootstrap superadmin (created once) |
+| `CACHE_*`    | Cache level, TTL, flush interval    |
+| `FILTER_IPS` | IPs that mark answers as FILTERED   |
+| `LOG_*`      | Log directory and rotation          |
+
+---
+
+## License
+
+GPL-3.0-only
+ure the configured port is available and that the application has the required permissions to use it.
+```

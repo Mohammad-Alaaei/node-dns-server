@@ -1,0 +1,106 @@
+# Backend-only stack: MySQL + DNS server + API + phpMyAdmin
+# Usage (from node-dns-server/ directory):
+#   cp .env.example .env          # optional – edit secrets
+#   docker compose up -d --build
+#
+# Ports:
+#   53/udp  → DNS
+#   3000    → HTTP API (needed when frontend runs elsewhere)
+#   8080    → phpMyAdmin
+
+name: dns-backend
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_secret}
+      MYSQL_DATABASE: ${DB_NAME:-dns_server}
+      MYSQL_USER: ${DB_USER:-dns}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_secret}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - backend_net
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      SERVER_IP: "0.0.0.0"
+      SERVER_PORT: "53"
+      DNS_PORT: "53"
+      API_HOST: "0.0.0.0"
+      API_PORT: "3000"
+      API_ENABLED: "true"
+      # When frontend is on another host you MUST set real origins
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:80}
+      API_CORS_CREDENTIALS: "true"
+      API_JWT_SECRET: ${API_JWT_SECRET:-change-me-in-production}
+      API_JWT_EXPIRES_IN: ${API_JWT_EXPIRES_IN:-15m}
+      API_REFRESH_EXPIRES_IN: ${API_REFRESH_EXPIRES_IN:-7d}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:-dns_server}
+      DB_USER: ${DB_USER:-dns}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      LOG_DIR: /app/logs
+      CACHE_LEVEL: ${CACHE_LEVEL:-ALL}
+      CACHE_EXPIRE_TIME: ${CACHE_EXPIRE_TIME:-60}
+      FLUSH_INTERVAL_MS: ${FLUSH_INTERVAL_MS:-60000}
+      DNS_TTL: ${DNS_TTL:-60}
+      DNS_TIMEOUT: ${DNS_TIMEOUT:-8000}
+      PTR_HOSTNAME: ${PTR_HOSTNAME:-localhost.com}
+      DEBUG_PREFIX: ${DEBUG_PREFIX:-_.}
+      FILTER_IPS: ${FILTER_IPS:-}
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+    ports:
+      - "53:53/udp"
+      - "3000:3000"
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      - backend_net
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_USER: ${DB_USER:-dns}
+      PMA_PASSWORD: ${DB_PASSWORD:-secret}
+      UPLOAD_LIMIT: 64M
+    ports:
+      - "8080:80"
+    networks:
+      - backend_net
+
+volumes:
+  mysql_data:
+  backend_logs:
+  backend_data:
+
+networks:
+  backend_net:
+    driver: bridge
