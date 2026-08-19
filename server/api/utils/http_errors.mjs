@@ -1,3 +1,26 @@
+/** Throw-style API error: controllers map `err.status` → JSON. */
+export function httpError(message, status = 400) {
+    const err = new Error(message);
+    err.status = status;
+    return err;
+}
+
+/**
+ * Express async handler: service throws → status JSON or next(err).
+ */
+export function asyncHandler(fn) {
+    return async (req, res, next) => {
+        try {
+            await fn(req, res, next);
+        } catch (err) {
+            if (err?.status) {
+                return res.status(err.status).json({ error: err.message });
+            }
+            return next(err);
+        }
+    };
+}
+
 /**
  * Map Sequelize / validation errors to HTTP responses.
  */

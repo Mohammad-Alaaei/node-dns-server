@@ -1,5 +1,4 @@
-import AuthService from "../services/AuthService.mjs";
-import authService from "../services/AuthService.mjs";
+import AuthService from '../services/AuthService.mjs';
 
 function clearAuthCookies(res) {
     const clear = 'Path=/; Max-Age=0; HttpOnly; SameSite=Strict';

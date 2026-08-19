@@ -1,72 +1,32 @@
 import { Router } from 'express';
-import { config } from '../../../config/config.mjs';
-import {
-    patchSystemSettings,
-    getUserSettings,
-    patchUserSettings
-} from '../../../database/repository.mjs';
 import { authenticate, requireRole } from '../middleware/auth.mjs';
+import { nextRouter } from '../middleware/nextRouter.mjs';
+import settingsController from '../controllers/SettingsController.mjs';
 
 const router = Router();
 
 router.use(authenticate);
 
-/**
- * GET /api/settings/system
- * Reads live config.system (single source of truth).
- */
-router.get('/system',
+/** GET /api/settings/system */
+router.get(
+    '/system',
     requireRole('superadmin', 'admin', 'viewer'),
-    (_req, res) => {
-        res.json({ settings: structuredClone(config.system) });
-    }
+    settingsController.getSystem,
+    nextRouter
 );
 
-/**
- * PATCH /api/settings/system
- * superadmin only — merges into config.system and persists DB blob.
- */
-router.patch('/system', requireRole('superadmin'), async (req, res, next) => {
-    try {
-        const result = await patchSystemSettings(req.body ?? {});
+/** PATCH /api/settings/system — superadmin */
+router.patch(
+    '/system',
+    requireRole('superadmin'),
+    settingsController.patchSystem,
+    nextRouter
+);
 
-        if (result.error) {
-            return res.status(400).json({ error: result.error });
-        }
+/** GET /api/settings/me */
+router.get('/me', settingsController.getMe, nextRouter);
 
-        return res.json({ settings: result.data });
-    } catch (err) {
-        return next(err);
-    }
-});
-
-/**
- * GET /api/settings/me
- */
-router.get('/me', async (req, res, next) => {
-    try {
-        const settings = await getUserSettings(req.user.id);
-        return res.json({ settings });
-    } catch (err) {
-        return next(err);
-    }
-});
-
-/**
- * PATCH /api/settings/me
- */
-router.patch('/me', async (req, res, next) => {
-    try {
-        const result = await patchUserSettings(req.user.id, req.body ?? {});
-
-        if (result.error) {
-            return res.status(result.status ?? 400).json({ error: result.error });
-        }
-
-        return res.json({ settings: result.data });
-    } catch (err) {
-        return next(err);
-    }
-});
+/** PATCH /api/settings/me */
+router.patch('/me', settingsController.patchMe, nextRouter);
 
 export default router;
