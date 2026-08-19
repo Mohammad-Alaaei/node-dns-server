@@ -1,4 +1,3 @@
-```markdown
 # node-dns-server
 
 Custom DNS server written in Node.js.
@@ -147,4 +146,3 @@ See `.env.example` for the full list. Key groups:
 
 GPL-3.0-only
 ure the configured port is available and that the application has the required permissions to use it.
-```
