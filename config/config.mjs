@@ -41,6 +41,12 @@ export const config = {
     // Bind address (infra — not in settings DB)
     server: {
         ip: process.env.SERVER_IP ?? '127.0.0.1',
+        /** IPv6 bind for DNS only (not API). Empty / unset with SERVER_IPV6="" disables IPv6. Default :: (or ::1 if SERVER_IP is loopback). */
+        ipv6: process.env.SERVER_IPV6 !== undefined
+            ? process.env.SERVER_IPV6
+            : ((process.env.SERVER_IP ?? '127.0.0.1') === '127.0.0.1' || (process.env.SERVER_IP ?? '') === '::1'
+                ? '::1'
+                : '::'),
         port: Number(process.env.SERVER_PORT ?? 53)
     },
 

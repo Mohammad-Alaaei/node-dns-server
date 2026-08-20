@@ -17,6 +17,7 @@ import { store } from './memory/store.mjs';
 import { CACHE_LEVELS } from './config/constants.mjs';
 
 const SERVER_IP = config.server.ip;
+const SERVER_IPV6 = config.server.ipv6;
 const SERVER_PORT = config.server.port;
 
 let shuttingDown = false;
@@ -39,7 +40,7 @@ async function main() {
     }
 
     await startApi();
-    await startServer(SERVER_IP, SERVER_PORT);
+    await startServer(SERVER_IP, SERVER_PORT, SERVER_IPV6);
 }
 
 /**

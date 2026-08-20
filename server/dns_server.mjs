@@ -3,19 +3,20 @@ import dgram from 'node:dgram';
 import * as logger from '../utils/logger.mjs';
 import { handleRequest } from './request_router.mjs';
 
-let server = null;
+/** @type {import('node:dgram').Socket | null} */
+let server4 = null;
+/** @type {import('node:dgram').Socket | null} */
+let server6 = null;
+
 const activeRequests = new Set();
 let shuttingDown = false;
 
 /**
- * Creates and starts the DNS server.
- *
- * @returns {Promise<void>}
+ * Attach shared message / error handlers to a UDP socket.
+ * @param {import('node:dgram').Socket} sock
  */
-async function startServer(ip, port) {
-    server = dgram.createSocket('udp4');
-
-    server.on('message', (message, remote) => {
+function attachHandlers(sock) {
+    sock.on('message', (message, remote) => {
         if (shuttingDown) {
             return;
         }
@@ -27,19 +28,74 @@ async function startServer(ip, port) {
         activeRequests.add(promise);
     });
 
-    server.on('error', err => {
+    sock.on('error', err => {
         logger.error(err);
     });
+}
 
-    await new Promise((resolve, reject) => {
-        server.once('error', reject);
-        server.bind(port, ip, () => {
-            server.removeListener('error', reject);
-            logger.info(`DNS server listening on ${ip}:${port}`);
-            logger.info('------------------------------------------------');
-            resolve();
+/**
+ * Bind one UDP socket. Rejects on hard errors (e.g. EADDRINUSE).
+ *
+ * @param {'udp4'|'udp6'} type
+ * @param {string} address
+ * @param {number} port
+ * @returns {Promise<import('node:dgram').Socket>}
+ */
+function bindSocket(type, address, port) {
+    return new Promise((resolve, reject) => {
+        const sock = dgram.createSocket({
+            type,
+            // Allow independent IPv4 + IPv6 binds on the same port
+            ipv6Only: type === 'udp6'
+        });
+
+        attachHandlers(sock);
+
+        sock.once('error', reject);
+        sock.bind(port, address, () => {
+            sock.removeListener('error', reject);
+            logger.info(`DNS server listening on ${address}:${port} (${type})`);
+            resolve(sock);
         });
     });
+}
+
+/**
+ * Creates and starts the DNS server (IPv4 + optional IPv6).
+ * API is unchanged — only DNS UDP sockets are dual-stack.
+ *
+ * @param {string} ipv4
+ * @param {number} port
+ * @param {string|null|undefined} ipv6  null/empty → skip IPv6 bind
+ * @returns {Promise<void>}
+ */
+async function startServer(ipv4, port, ipv6 = '::') {
+    server4 = await bindSocket('udp4', ipv4, port);
+
+    if (ipv6 != null && String(ipv6).trim() !== '') {
+        try {
+            server6 = await bindSocket('udp6', String(ipv6).trim(), port);
+        } catch (err) {
+            // Missing IPv6 stack / permission — keep serving IPv4
+            logger.warn(
+                `DNS IPv6 bind failed (${ipv6}:${port}): ${err.code ?? err.message}. Continuing IPv4-only.`
+            );
+            server6 = null;
+        }
+    }
+
+    logger.info('------------------------------------------------');
+}
+
+/**
+ * Pick the socket that matches the client's address family.
+ * @param {import('node:dgram').RemoteInfo} remote
+ */
+function socketForRemote(remote) {
+    if (remote.family === 'IPv6' || remote.family === 6) {
+        return server6 ?? server4;
+    }
+    return server4 ?? server6;
 }
 
 /**
@@ -52,25 +108,25 @@ async function startServer(ip, port) {
  * }} response
  */
 function sendResponse(remote, response) {
-    if (shuttingDown || !server) {
+    if (shuttingDown) {
+        return;
+    }
+
+    const sock = socketForRemote(remote);
+    if (!sock) {
         return;
     }
 
     try {
-        if (response.packet) {
-            server.send(
-                response.packet.toBuffer(),
-                remote.port,
-                remote.address
-            );
+        const payload = response.packet
+            ? response.packet.toBuffer()
+            : response.buffer;
+
+        if (!payload) {
             return;
         }
 
-        server.send(
-            response.buffer,
-            remote.port,
-            remote.address
-        );
+        sock.send(payload, remote.port, remote.address);
     } catch (err) {
         if (err.code !== 'ERR_SOCKET_DGRAM_NOT_RUNNING') {
             throw err;
@@ -82,7 +138,7 @@ function sendResponse(remote, response) {
  * Graceful DNS server stop:
  * 1. Reject new requests
  * 2. Drain in-flight handlers
- * 3. Close the UDP socket
+ * 3. Close UDP sockets
  */
 async function stopServer() {
     if (shuttingDown) {
@@ -92,23 +148,27 @@ async function stopServer() {
     shuttingDown = true;
     logger.info('Stopping DNS server…');
 
-    // Let in-flight request handlers finish
     if (activeRequests.size > 0) {
         logger.info(`Waiting for ${activeRequests.size} active DNS request(s)…`);
         await Promise.allSettled([...activeRequests]);
     }
 
-    if (server) {
-        await new Promise(resolve => {
-            server.close(() => resolve());
+    const closeOne = (sock) =>
+        new Promise(resolve => {
+            if (!sock) {
+                resolve();
+                return;
+            }
+            sock.close(() => resolve());
         });
-        server = null;
-    }
+
+    await Promise.all([closeOne(server4), closeOne(server6)]);
+    server4 = null;
+    server6 = null;
 
     logger.info('DNS server stopped');
 }
 
-// Keep process-level error logging here (not signal handlers)
 process.on('uncaughtException', err => {
     logger.error('[uncaughtException]', err);
 });
