@@ -4,7 +4,7 @@
 #   docker compose up -d --build
 #
 # Ports:
-#   53/udp  → DNS
+#   53/udp  → DNS (IPv4 + IPv6)
 #   3000    → HTTP API (needed when frontend runs elsewhere)
 #   8080    → phpMyAdmin
 
@@ -41,6 +41,8 @@ services:
     environment:
       NODE_ENV: production
       SERVER_IP: "0.0.0.0"
+      # DNS IPv6 (all interfaces). Empty string disables IPv6 listen.
+      SERVER_IPV6: "::"
       SERVER_PORT: "53"
       DNS_PORT: "53"
       API_HOST: "0.0.0.0"
@@ -59,7 +61,15 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      DB_POOL_MIN: ${DB_POOL_MIN:-0}
+      DB_POOL_ACQUIRE: ${DB_POOL_ACQUIRE:-30000}
+      DB_POOL_IDLE: ${DB_POOL_IDLE:-10000}
+      DB_LOGGING: ${DB_LOGGING:-false}
       LOG_DIR: /app/logs
+      LOG_FLUSH_INTERVAL: ${LOG_FLUSH_INTERVAL:-5000}
+      LOG_MAX_BUFFER_SIZE: ${LOG_MAX_BUFFER_SIZE:-100}
+      LOG_MAX_SIZE_KB: ${LOG_MAX_SIZE_KB:-10240}
       CACHE_LEVEL: ${CACHE_LEVEL:-ALL}
       CACHE_EXPIRE_TIME: ${CACHE_EXPIRE_TIME:-60}
       FLUSH_INTERVAL_MS: ${FLUSH_INTERVAL_MS:-60000}
@@ -68,11 +78,25 @@ services:
       PTR_HOSTNAME: ${PTR_HOSTNAME:-localhost.com}
       DEBUG_PREFIX: ${DEBUG_PREFIX:-_.}
       FILTER_IPS: ${FILTER_IPS:-}
+      IGNORE_IPS: ${IGNORE_IPS:-}
+      API_RSA_PUBLIC_KEY: ${API_RSA_PUBLIC_KEY:-}
+      API_RSA_PRIVATE_KEY: ${API_RSA_PRIVATE_KEY:-}
+      UI_LANGUAGE: ${UI_LANGUAGE:-en}
+      UI_THEME: ${UI_THEME:-system}
+      UI_DARK_MODE: ${UI_DARK_MODE:-false}
     volumes:
       - backend_logs:/app/logs
       - backend_data:/app/data
     ports:
-      - "53:53/udp"
+      # DNS — publish on IPv4 and IPv6 host stacks (API stays IPv4-only below)
+      - target: 53
+        published: 53
+        protocol: udp
+        host_ip: 0.0.0.0
+      - target: 53
+        published: 53
+        protocol: udp
+        host_ip: "::"
       - "3000:3000"
     cap_add:
       - NET_BIND_SERVICE
@@ -104,3 +128,8 @@ volumes:
 networks:
   backend_net:
     driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+        - subnet: "fd00:30::/64"
