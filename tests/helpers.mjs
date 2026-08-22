@@ -6,6 +6,7 @@ export function resetStore() {
     store.regexRecords.length = 0;
     store.defaultDnsServers.length = 0;
     store.customDnsServers.length = 0;
+    store.rewriteRules.length = 0;
 }
 
 export function makeValues(addresses, { expired = false, ttl = 60 } = {}) {

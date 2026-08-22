@@ -4,6 +4,7 @@ import { createSchema } from './database/schema.mjs';
 import {
     loadRecords,
     loadDnsServers,
+    loadRewriteRules,
     loadSystemSettings
 } from './database/repository.mjs';
 import { close as closeDatabase } from './database/connection.mjs';
@@ -28,8 +29,10 @@ async function main() {
 
     await loadRecords();
     await loadDnsServers();
+    await loadRewriteRules();
 
     store.regexRecords.sort((a, b) => b.domain.length - a.domain.length);
+    store.rewriteRules.sort((a, b) => b.pattern.length - a.pattern.length);
 
     // Always init logger (errors / app messages). Upstream answer lines
     // are gated by CACHE_LEVEL inside response_parser.

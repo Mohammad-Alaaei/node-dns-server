@@ -5,7 +5,8 @@ import {
     DnsRule,
     Record,
     RecordValue,
-    Setting
+    Setting,
+    RewriteRule
 } from './models/index.mjs';
 import { store } from '../memory/store.mjs';
 import { RECORD_SOURCE, RECORD_STATUS, DNS_SERVER_TYPE } from '../config/constants.mjs';
@@ -808,4 +809,48 @@ export async function patchUserSettings(userId, patch) {
     });
 
     return { data: next };
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Rewrite rules                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Load enabled rewrite rules into memory (sorted by pattern length desc).
+ */
+export async function loadRewriteRules() {
+    store.rewriteRules.length = 0;
+
+    const rows = await RewriteRule.findAll({
+        where: { enabled: true },
+        order: [
+            [sequelize.fn('LENGTH', sequelize.col('pattern')), 'DESC'],
+            ['pattern', 'ASC']
+        ]
+    });
+
+    for (const row of rows) {
+        const plain = row.get({ plain: true });
+        let regex = null;
+        try {
+            regex = new RegExp(`^(?:${plain.pattern})$`, 'i');
+        } catch {
+            continue;
+        }
+
+        store.rewriteRules.push({
+            id: plain.id,
+            name: plain.name ?? null,
+            pattern: plain.pattern,
+            regex,
+            action: plain.action,
+            params:
+                plain.params && typeof plain.params === 'object'
+                    ? plain.params
+                    : {},
+            enabled: true,
+            createdAt: plain.created_at,
+            updatedAt: plain.updated_at
+        });
+    }
 }

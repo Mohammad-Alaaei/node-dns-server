@@ -3,6 +3,7 @@ import { decorateDebugResponse } from '../server/response_builder.mjs';
 import { handleUpstreamResponse } from './response_parser.mjs';
 import { forwardToExternalDns } from './upstream_resolver.mjs';
 import { selectUpstream } from './upstream_selector.mjs';
+import { normalizeDomain } from '../utils/domain_utils.mjs';
 
 export async function handleExternalRequests(
     request,
@@ -20,14 +21,17 @@ export async function handleExternalRequests(
 
     console.log('=============');
 
+    // Always query upstream for the domain we are resolving (may differ from
+    // the client question when a rewrite rule redirected us to a CNAME target).
     let upstreamMessage = message;
+    const originalQuestion = request.questions[0].name;
+    const needsRewrite =
+        normalizeDomain(originalQuestion) !== normalizeDomain(domain);
 
-    if (debug) {
-        const original = request.questions[0].name;
-
+    if (debug || needsRewrite) {
         request.questions[0].name = domain;
         upstreamMessage = request.toBuffer();
-        request.questions[0].name = original;
+        request.questions[0].name = originalQuestion;
     }
 
     const response = await forwardToExternalDns(

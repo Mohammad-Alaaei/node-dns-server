@@ -239,7 +239,8 @@ export function memoryCounts() {
         exactRecords: store.exactRecords.size,
         regexRecords: store.regexRecords.length,
         defaultDnsServers: store.defaultDnsServers.length,
-        customDnsServers: store.customDnsServers.length
+        customDnsServers: store.customDnsServers.length,
+        rewriteRules: store.rewriteRules.length
     };
 }
 
@@ -373,5 +374,73 @@ export function applyRecordReplace(row) {
         store.regexRecords.sort((a, b) => b.domain.length - a.domain.length);
     } else {
         store.exactRecords.set(row.domain, record);
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Rewrite rules                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Normalize a DB/plain rewrite_rules row to the in-memory shape.
+ */
+export function toMemoryRewriteRule(row) {
+    const r = row.get ? row.get({ plain: true }) : row;
+    let regex = null;
+    try {
+        regex = new RegExp(`^(?:${r.pattern})$`, 'i');
+    } catch {
+        regex = null;
+    }
+    return {
+        id: r.id,
+        name: r.name ?? null,
+        pattern: r.pattern,
+        regex,
+        action: r.action,
+        params: r.params && typeof r.params === 'object' ? r.params : {},
+        enabled: !!r.enabled,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at
+    };
+}
+
+function sortRewriteRules() {
+    store.rewriteRules.sort((a, b) => b.pattern.length - a.pattern.length);
+}
+
+/**
+ * Insert or replace a rewrite rule in memory by id.
+ */
+export function applyRewriteRuleUpsert(row) {
+    const mem = toMemoryRewriteRule(row);
+    if (!mem.regex) {
+        // Invalid pattern — do not keep a broken rule in the hot path
+        applyRewriteRuleRemoveById(mem.id);
+        return;
+    }
+
+    const idx = store.rewriteRules.findIndex(r => r.id === mem.id);
+    if (idx >= 0) {
+        if (!mem.enabled) {
+            store.rewriteRules.splice(idx, 1);
+        } else {
+            store.rewriteRules[idx] = mem;
+            sortRewriteRules();
+        }
+    } else if (mem.enabled) {
+        store.rewriteRules.push(mem);
+        sortRewriteRules();
+    }
+}
+
+/**
+ * Remove a rewrite rule from memory by DB id.
+ */
+export function applyRewriteRuleRemoveById(id) {
+    for (let i = store.rewriteRules.length - 1; i >= 0; i--) {
+        if (store.rewriteRules[i].id === id) {
+            store.rewriteRules.splice(i, 1);
+        }
     }
 }

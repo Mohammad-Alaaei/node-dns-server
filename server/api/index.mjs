@@ -12,6 +12,7 @@ import logsRoutes from './routes/logs.mjs';
 import systemRoutes from './routes/system.mjs';
 import statisticsRoutes from './routes/statistics.mjs';
 import settingsRoutes from './routes/settings.mjs';
+import rewriteRulesRoutes from './routes/rewrite-rules.mjs';
 import * as logger from '../../utils/logger.mjs';
 
 let server = null;
@@ -49,6 +50,7 @@ export async function startApi() {
     app.use('/api/system', systemRoutes);
     app.use('/api/statistics', statisticsRoutes);
     app.use('/api/settings', settingsRoutes);
+    app.use('/api/rewrite-rules', rewriteRulesRoutes);
 
     // 404 for anything not matched above
     app.use((req, res) => {

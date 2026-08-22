@@ -10,7 +10,7 @@ router.use(authenticate, requireRole('superadmin'));
 /** POST /api/system/flush */
 router.post('/flush', systemController.flush, nextRouter);
 
-/** POST /api/system/reload — body: { scope?: 'all'|'records'|'dns-servers' } */
+/** POST /api/system/reload — body: { scope?: 'all'|'records'|'dns-servers'|'rewrite-rules' } */
 router.post('/reload', systemController.reload, nextRouter);
 
 export default router;

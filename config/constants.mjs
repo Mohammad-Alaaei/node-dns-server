@@ -36,7 +36,21 @@ export const RECORD_SOURCE = {
     FILTERED: 'FILTERED'
 };
 
+/**
+ * Upstream DNS server kinds (dns_servers.type).
+ * DEFAULT — used for general resolution (round-robin among enabled).
+ * CUSTOM  — typically paired with dns_rules for domain-specific routing.
+ * Rules may still be attached to either type; the resolver groups by rule domain.
+ */
 export const DNS_SERVER_TYPE = {
     DEFAULT: 'DEFAULT',
     CUSTOM: 'CUSTOM'
-}
+};
+
+/**
+ * Rewrite-rule actions (rewrite_rules.action).
+ * Start with cname_rewrite; more actions can be added later.
+ */
+export const REWRITE_ACTIONS = {
+    CNAME_REWRITE: 'cname_rewrite'
+};

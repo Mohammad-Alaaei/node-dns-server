@@ -6,6 +6,7 @@ import { Statistic } from './statistic.mjs';
 import { Setting } from './setting.mjs';
 import { User } from './user.mjs';
 import { RefreshToken } from './refresh-token.mjs';
+import { RewriteRule } from './rewrite-rule.mjs';
 
 /* -------------------------------------------------------------------------- */
 /*                              Associations                                  */
@@ -60,7 +61,8 @@ export {
     Statistic,
     Setting,
     User,
-    RefreshToken
+    RefreshToken,
+    RewriteRule
 };
 
 export default {
@@ -71,5 +73,6 @@ export default {
     Statistic,
     Setting,
     User,
-    RefreshToken
+    RefreshToken,
+    RewriteRule
 };

@@ -8,8 +8,13 @@ import {
 } from '../memory/resolver.mjs';
 import { appendDebugRecords, createRecordResponse } from '../server/response_builder.mjs';
 import { handleExternalRequests } from '../services/upstream_service.mjs';
+import {
+    resolveRewrite,
+    injectCnameAnswer,
+    MAX_REWRITE_DEPTH
+} from '../services/rewrite_service.mjs';
 import { Packet } from 'dns2';
-import { RECORD_SOURCE } from '../config/constants.mjs';
+import { RECORD_SOURCE, REWRITE_ACTIONS } from '../config/constants.mjs';
 
 const SERVER_IP = config.server.ip;
 
@@ -50,21 +55,58 @@ export function selectServer(record, type) {
     return record.servers
         .filter(s =>
             s.isStale &&
-            (s[type].length || s.CNAME.length)
+            (
+                s[type].length ||
+                s.CNAME.length
+            )
         )
         .sort((a, b) => (b.lastSuccessAt ?? 0) - (a.lastSuccessAt ?? 0))[0] ?? null;
 }
 
 /**
  * Handles record types stored in DB / memory.
+ * Optionally applies rewrite rules (e.g. cname_rewrite) before normal lookup.
  */
 export async function handleLocalRecord({
     request,
     message,
     domain,
     type,
-    debug = false
+    debug = false,
+    _rewriteDepth = 0
 }) {
+
+    // Rewrite rules run early for A/AAAA/CNAME so the original name is never
+    // sent upstream when a cname_rewrite matches.
+    if (
+        _rewriteDepth < MAX_REWRITE_DEPTH &&
+        (type === 'A' || type === 'AAAA' || type === 'CNAME')
+    ) {
+        const rewrite = resolveRewrite(domain);
+        if (rewrite && rewrite.action === REWRITE_ACTIONS.CNAME_REWRITE) {
+            logger.info(
+                `REWRITE cname: ${domain} → ${rewrite.target}` +
+                    (debug ? ' [debug]' : '')
+            );
+
+            const targetResult = await handleLocalRecord({
+                request,
+                message,
+                domain: rewrite.target,
+                type,
+                debug,
+                _rewriteDepth: _rewriteDepth + 1
+            });
+
+            return injectCnameAnswer(
+                request,
+                domain,
+                rewrite.target,
+                targetResult,
+                debug
+            );
+        }
+    }
 
     const record = findRecord(domain, type);
 
