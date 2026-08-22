@@ -11,6 +11,7 @@ import { handleExternalRequests } from '../services/upstream_service.mjs';
 import {
     resolveRewrite,
     injectCnameAnswer,
+    cacheRewriteCname,
     MAX_REWRITE_DEPTH
 } from '../services/rewrite_service.mjs';
 import { Packet } from 'dns2';
@@ -20,7 +21,6 @@ const SERVER_IP = config.server.ip;
 
 export function selectServer(record, type) {
 
-    // LOCAL records are authoritative.
     if (record.source === RECORD_SOURCE.LOCAL) {
         return record.servers[0] ?? null;
     }
@@ -98,6 +98,10 @@ export async function handleLocalRecord({
                 _rewriteDepth: _rewriteDepth + 1
             });
 
+            // Store original domain → synthetic CNAME so it appears in records
+            // (upstream cache only writes the rewritten target name).
+            cacheRewriteCname(domain, rewrite.target);
+
             return injectCnameAnswer(
                 request,
                 domain,
@@ -154,7 +158,10 @@ export async function handleLocalRecord({
                 });
             }
 
-            return { packet, buffer: null };
+            return {
+                packet,
+                buffer: null
+            };
         }
 
         // LOCAL exists but this type is missing — only then allow upstream.

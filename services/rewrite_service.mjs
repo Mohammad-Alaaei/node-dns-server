@@ -3,9 +3,20 @@ import { normalizeDomain } from '../utils/domain_utils.mjs';
 import { REWRITE_ACTIONS } from '../config/constants.mjs';
 import { Packet } from 'dns2';
 import * as logger from '../utils/logger.mjs';
+import { cacheRecord } from './cache_service.mjs';
+import { isCacheEnabled } from './cache_policy.mjs';
+import { config } from '../config/config.mjs';
 
 const MAX_REWRITE_DEPTH = 5;
 const DEFAULT_CNAME_TTL = 60;
+
+function getExpireMs() {
+    const sec =
+        config.system?.cache?.expireTime ??
+        config.cache?.expireTime ??
+        DEFAULT_CNAME_TTL;
+    return Number(sec) * 1000;
+}
 
 /**
  * Find the first matching rewrite rule for a domain.
@@ -168,6 +179,51 @@ export function injectCnameAnswer(
         packet,
         buffer: null
     };
+}
+
+/**
+ * Persist the synthetic CNAME under the *original* queried name so it shows up
+ * in `records` / `record_values` (and is served from memory before the next flush).
+ * Upstream caching only stores the rewritten target; this fills the gap.
+ *
+ * @param {string} originalDomain
+ * @param {string} targetDomain
+ * @param {number|null} [dnsServerId]
+ */
+export function cacheRewriteCname(originalDomain, targetDomain, dnsServerId = null) {
+    originalDomain = normalizeDomain(originalDomain);
+    targetDomain = normalizeDomain(targetDomain);
+
+    if (!originalDomain || !targetDomain || originalDomain === targetDomain) {
+        return;
+    }
+
+    if (!isCacheEnabled()) {
+        return;
+    }
+
+    const now = Date.now();
+    const ttl = DEFAULT_CNAME_TTL;
+    const expiresAt = now + getExpireMs();
+
+    cacheRecord(
+        {
+            domain: originalDomain,
+            A: [],
+            AAAA: [],
+            CNAME: [
+                {
+                    name: originalDomain,
+                    domain: targetDomain,
+                    ttl,
+                    expiresAt
+                }
+            ]
+        },
+        dnsServerId
+    );
+
+    logger.info(`REWRITE cache CNAME ${originalDomain} → ${targetDomain}`);
 }
 
 export { MAX_REWRITE_DEPTH };
