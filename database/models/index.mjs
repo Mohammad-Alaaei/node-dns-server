@@ -7,6 +7,8 @@ import { Setting } from './setting.mjs';
 import { User } from './user.mjs';
 import { RefreshToken } from './refresh-token.mjs';
 import { RewriteRule } from './rewrite-rule.mjs';
+import { ExternalResolver } from './external-resolver.mjs';
+import { ExternalResolverKey } from './external-resolver-key.mjs';
 
 /* -------------------------------------------------------------------------- */
 /*                              Associations                                  */
@@ -53,6 +55,16 @@ RecordValue.belongsTo(DnsServer, {
     as: 'dnsServer'
 });
 
+ExternalResolver.hasMany(ExternalResolverKey, {
+    foreignKey: 'resolver_id',
+    as: 'keys',
+    onDelete: 'CASCADE'
+});
+ExternalResolverKey.belongsTo(ExternalResolver, {
+    foreignKey: 'resolver_id',
+    as: 'resolver'
+});
+
 export {
     DnsServer,
     DnsRule,
@@ -62,7 +74,9 @@ export {
     Setting,
     User,
     RefreshToken,
-    RewriteRule
+    RewriteRule,
+    ExternalResolver,
+    ExternalResolverKey
 };
 
 export default {
@@ -74,5 +88,7 @@ export default {
     Setting,
     User,
     RefreshToken,
-    RewriteRule
+    RewriteRule,
+    ExternalResolver,
+    ExternalResolverKey
 };

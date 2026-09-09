@@ -13,6 +13,8 @@ import systemRoutes from './routes/system.mjs';
 import statisticsRoutes from './routes/statistics.mjs';
 import settingsRoutes from './routes/settings.mjs';
 import rewriteRulesRoutes from './routes/rewrite-rules.mjs';
+import externalResolversRoutes from './routes/external-resolvers.mjs';
+import ExternalResolversService from './services/ExternalResolversService.mjs';
 import * as logger from '../../utils/logger.mjs';
 
 let server = null;
@@ -51,6 +53,9 @@ export async function startApi() {
     app.use('/api/statistics', statisticsRoutes);
     app.use('/api/settings', settingsRoutes);
     app.use('/api/rewrite-rules', rewriteRulesRoutes);
+    app.use('/api/external-resolvers', externalResolversRoutes);
+
+    ExternalResolversService.startUsageSyncScheduler();
 
     // 404 for anything not matched above
     app.use((req, res) => {
@@ -78,6 +83,8 @@ export async function startApi() {
 }
 
 export async function stopApi() {
+    ExternalResolversService.stopUsageSyncScheduler();
+
     if (!server) return;
 
     const httpServer = server;

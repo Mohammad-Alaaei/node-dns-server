@@ -54,3 +54,28 @@ export const DNS_SERVER_TYPE = {
 export const REWRITE_ACTIONS = {
     CNAME_REWRITE: 'cname_rewrite'
 };
+
+/**
+ * External DNS lookup providers (HTTP APIs, not upstream DNS).
+ */
+export const EXTERNAL_RESOLVER_PROVIDERS = {
+    MXTOOLBOX: 'mxtoolbox'
+};
+
+/**
+ * When an external resolver may be used by the DNS path (future) vs manual only.
+ * manual_only — frontend / API lookup only
+ * filtered_only / timeout / all — reserved for automated resolve path later
+ */
+export const EXTERNAL_RESOLVER_MODES = {
+    MANUAL_ONLY: 'manual_only',
+    FILTERED_ONLY: 'filtered_only',
+    TIMEOUT: 'timeout',
+    ALL: 'all'
+};
+
+/** Default key quota window (1 day). */
+export const EXTERNAL_RESOLVER_DEFAULT_PERIOD_MS = 86400000;
+
+/** How often to sync usage counters from provider APIs. */
+export const EXTERNAL_RESOLVER_USAGE_SYNC_MS = 15 * 60 * 1000;
