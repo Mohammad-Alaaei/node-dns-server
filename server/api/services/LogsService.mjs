@@ -182,6 +182,90 @@ class LogsService {
             meta
         };
     }
+
+    /**
+     * Resolve a safe absolute path for a log file, or throw.
+     * Optionally flush the current session file first.
+     */
+    async resolveLogPath(filename, { flushIfCurrent = false } = {}) {
+        if (!isSafeLogName(filename)) {
+            throw httpError('Invalid log filename', 400);
+        }
+
+        const logDir = path.resolve(getLogDir());
+        const full = path.join(logDir, filename);
+        const resolved = path.resolve(full);
+
+        if (!resolved.startsWith(logDir + path.sep) && resolved !== logDir) {
+            throw httpError('Invalid log filename', 400);
+        }
+
+        const sessionFile = getSessionLogFile();
+        const isCurrent =
+            sessionFile && path.resolve(sessionFile) === resolved;
+
+        if (isCurrent && flushIfCurrent) {
+            await flushLogger();
+        }
+
+        return { resolved, isCurrent: !!isCurrent };
+    }
+
+    /**
+     * Absolute path + metadata for download streaming.
+     * Flushes current session so the file is up to date.
+     */
+    async getDownloadPath(filename) {
+        const { resolved, isCurrent } = await this.resolveLogPath(filename, {
+            flushIfCurrent: true
+        });
+
+        let st;
+        try {
+            st = await fs.stat(resolved);
+        } catch (err) {
+            if (err && err.code === 'ENOENT') {
+                throw httpError('Log file not found', 404);
+            }
+            throw err;
+        }
+
+        if (!st.isFile()) {
+            throw httpError('Log file not found', 404);
+        }
+
+        return {
+            path: resolved,
+            name: filename,
+            size: st.size,
+            current: isCurrent
+        };
+    }
+
+    /**
+     * Delete a log file. Refuses to delete the active session file.
+     */
+    async delete(filename) {
+        const { resolved, isCurrent } = await this.resolveLogPath(filename);
+
+        if (isCurrent) {
+            throw httpError(
+                'Cannot delete the current session log. Rotate first.',
+                409
+            );
+        }
+
+        try {
+            await fs.unlink(resolved);
+        } catch (err) {
+            if (err && err.code === 'ENOENT') {
+                throw httpError('Log file not found', 404);
+            }
+            throw err;
+        }
+
+        return { ok: true, name: filename };
+    }
 }
 
 export default new LogsService();

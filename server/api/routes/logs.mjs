@@ -13,6 +13,12 @@ router.get('/', logsController.list, nextRouter);
 /** POST /api/logs/rotate */
 router.post('/rotate', requireRole('superadmin'), logsController.rotate, nextRouter);
 
+/** GET /api/logs/:filename/download — stream file as attachment */
+router.get('/:filename/download', logsController.download, nextRouter);
+
+/** DELETE /api/logs/:filename — delete a non-current log file */
+router.delete('/:filename', logsController.remove, nextRouter);
+
 /** GET /api/logs/:filename?lines=200 | ?offset=0&limit=500 */
 router.get('/:filename', logsController.read, nextRouter);
 
