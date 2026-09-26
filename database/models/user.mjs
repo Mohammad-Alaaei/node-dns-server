@@ -1,10 +1,14 @@
 import { sequelize, DataTypes } from '../connection.mjs';
 
 /**
- * Roles (expand later without schema change):
+ * Roles:
+ *   system     — internal row (id=0), not for login
  *   superadmin — full control
- *   admin      — edit records / dns servers (future)
- *   viewer     — read-only (future)
+ *   admin      — manage users (limited) + app config
+ *   viewer     — read-only
+ *
+ * Soft delete: deleted_at set → excluded from auth and default lists.
+ * enabled=false → cannot login (admin can re-enable).
  */
 export const User = sequelize.define('users', {
     id: {
@@ -25,6 +29,16 @@ export const User = sequelize.define('users', {
         type: DataTypes.STRING(32),
         allowNull: false,
         defaultValue: 'viewer'
+    },
+    enabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true
+    },
+    deleted_at: {
+        type: DataTypes.BIGINT,
+        allowNull: true,
+        defaultValue: null
     },
     created_at: {
         type: DataTypes.BIGINT,
