@@ -28,6 +28,11 @@ export const ExternalResolverKey = sequelize.define('external_resolver_keys', {
         allowNull: false,
         defaultValue: true
     },
+    auto_sync: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true
+    },
     period_limit: {
         type: DataTypes.INTEGER.UNSIGNED,
         allowNull: false,

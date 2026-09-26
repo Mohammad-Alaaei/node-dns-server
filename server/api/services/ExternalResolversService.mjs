@@ -80,28 +80,79 @@ function raiseSequelize(err) {
     throw err;
 }
 
+/** Mask full API key for API responses (e.g. c7d8…1ec1). Never expose the secret. */
+function maskApiKey(raw) {
+    const s = String(raw ?? '').trim();
+    if (!s) return '';
+    if (s.length <= 8) return '••••';
+    return `${s.slice(0, 4)}…${s.slice(-4)}`;
+}
+
+/** Local calendar midnight for timestamp `t` (server timezone). */
+function startOfLocalDay(t) {
+    const d = new Date(t);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+}
+
+/**
+ * Midnight-aligned period start for manual (non auto_sync) keys.
+ * Daily period → current local midnight. Multi-day → midnight of period block.
+ */
+function midnightAlignedPeriodStart(t, periodMs) {
+    const dayMs = 86400000;
+    const dayStart = startOfLocalDay(t);
+    if (periodMs <= dayMs) {
+        return dayStart;
+    }
+    const nDays = Math.max(1, Math.round(periodMs / dayMs));
+    const epochDay = Math.floor(dayStart / dayMs);
+    const periodIndex = Math.floor(epochDay / nDays);
+    return periodIndex * nDays * dayMs;
+}
+
+function effectiveRemaining(limit, used) {
+    if (limit <= 0) return Number.POSITIVE_INFINITY;
+    return Math.max(0, limit - used);
+}
+
 function serializeKey(row) {
     const k = row.get ? row.get({ plain: true }) : row;
     const periodStart = Number(k.period_start) || 0;
     const periodMs = Number(k.period_ms) || EXTERNAL_RESOLVER_DEFAULT_PERIOD_MS;
     const used = Number(k.used_count) || 0;
     const limit = Number(k.period_limit) || 0;
-    const expired = periodStart > 0 && now() - periodStart >= periodMs;
-    const effectiveUsed = expired ? 0 : used;
-    const remaining =
-        limit <= 0 ? 0 : Math.max(0, limit - effectiveUsed);
+    const autoSync = k.auto_sync !== false;
+    const t = now();
+
+    let effectiveUsed = used;
+    let effectivePeriodStart = periodStart || null;
+
+    if (!autoSync) {
+        const aligned = midnightAlignedPeriodStart(t, periodMs);
+        if (!periodStart || periodStart < aligned) {
+            effectiveUsed = 0;
+            effectivePeriodStart = aligned;
+        }
+    } else if (periodStart > 0 && t - periodStart >= periodMs) {
+        effectiveUsed = 0;
+        effectivePeriodStart = null;
+    }
+
+    const remaining = effectiveRemaining(limit, effectiveUsed);
 
     return {
         id: k.id,
         resolver_id: k.resolver_id,
-        api_key: k.api_key,
+        api_key_hint: maskApiKey(k.api_key),
         label: k.label ?? null,
         priority: Number(k.priority) || 0,
         enabled: !!k.enabled,
+        auto_sync: autoSync,
         period_limit: limit,
         used_count: effectiveUsed,
-        remaining,
-        period_start: expired ? null : periodStart || null,
+        remaining: Number.isFinite(remaining) ? remaining : null,
+        period_start: effectivePeriodStart,
         period_ms: periodMs,
         last_error: k.last_error ?? null,
         last_used_at: k.last_used_at ?? null,
@@ -129,22 +180,37 @@ function serializeResolver(row, keys = null) {
 }
 
 /**
- * Reset period counters if the window has elapsed.
- * Mutates DB when needed; returns plain effective values.
+ * Reset period counters when the window has elapsed.
+ * - auto_sync keys: sliding window from period_start + period_ms
+ * - manual keys: reset at local midnight boundaries (period_ms length)
  */
 async function ensurePeriodFresh(keyRow) {
     const periodMs =
         Number(keyRow.period_ms) || EXTERNAL_RESOLVER_DEFAULT_PERIOD_MS;
     const periodStart = Number(keyRow.period_start) || 0;
+    const autoSync = keyRow.auto_sync !== false;
     const t = now();
 
-    if (periodStart > 0 && t - periodStart < periodMs) {
+    if (autoSync) {
+        if (periodStart > 0 && t - periodStart < periodMs) {
+            return keyRow;
+        }
+        await keyRow.update({
+            used_count: 0,
+            period_start: t,
+            updated_at: t
+        });
+        return keyRow;
+    }
+
+    const aligned = midnightAlignedPeriodStart(t, periodMs);
+    if (periodStart > 0 && periodStart >= aligned) {
         return keyRow;
     }
 
     await keyRow.update({
         used_count: 0,
-        period_start: t,
+        period_start: aligned,
         updated_at: t
     });
     return keyRow;
@@ -162,8 +228,15 @@ function keyHasQuota(keyPlain) {
     return used < limit;
 }
 
+function remainingOf(keyPlain) {
+    const limit = Number(keyPlain.period_limit) || 0;
+    const used = Number(keyPlain.used_count) || 0;
+    return effectiveRemaining(limit, used);
+}
+
 /**
- * First usable key in priority order. Does not send requests for exhausted keys.
+ * Prefer the enabled key with the most remaining quota; tie-break by lowest priority, then id.
+ * Spreads load across keys instead of draining one first.
  * @param {number} resolverId
  * @returns {Promise<import('sequelize').Model|null>}
  */
@@ -172,20 +245,39 @@ async function pickNextKey(resolverId) {
         where: {
             resolver_id: resolverId,
             enabled: true
-        },
-        order: [
-            ['priority', 'ASC'],
-            ['id', 'ASC']
-        ]
+        }
     });
+
+    let best = null;
+    let bestRemaining = -1;
+    let bestPriority = Number.POSITIVE_INFINITY;
+    let bestId = Number.POSITIVE_INFINITY;
 
     for (const key of keys) {
         await ensurePeriodFresh(key);
-        if (keyHasQuota(key)) {
-            return key;
+        if (!keyHasQuota(key)) continue;
+
+        const rem = remainingOf(key);
+        const remScore = Number.isFinite(rem) ? rem : Number.MAX_SAFE_INTEGER;
+        const priority = Number(key.priority) || 0;
+        const id = Number(key.id) || 0;
+
+        const better =
+            remScore > bestRemaining ||
+            (remScore === bestRemaining && priority < bestPriority) ||
+            (remScore === bestRemaining &&
+                priority === bestPriority &&
+                id < bestId);
+
+        if (better) {
+            best = key;
+            bestRemaining = remScore;
+            bestPriority = priority;
+            bestId = id;
         }
     }
-    return null;
+
+    return best;
 }
 
 async function incrementKeyUsage(keyRow) {
@@ -263,10 +355,17 @@ function parseKeyBody(body, { partial }) {
     const data = {};
 
     if (!partial || body.api_key !== undefined) {
-        if (typeof body.api_key !== 'string' || !body.api_key.trim()) {
+        // On create: required. On update: optional (omit / empty = keep existing).
+        if (body.api_key === undefined || body.api_key === null || body.api_key === '') {
+            if (!partial) {
+                return { error: 'api_key is required' };
+            }
+            // partial update without key change
+        } else if (typeof body.api_key !== 'string' || !body.api_key.trim()) {
             return { error: 'api_key is required' };
+        } else {
+            data.api_key = body.api_key.trim().slice(0, 512);
         }
-        data.api_key = body.api_key.trim().slice(0, 512);
     }
 
     if (!partial || body.label !== undefined) {
@@ -292,6 +391,13 @@ function parseKeyBody(body, { partial }) {
             return { error: 'enabled must be a boolean' };
         }
         data.enabled = body.enabled;
+    }
+
+    if (!partial || body.auto_sync !== undefined) {
+        if (typeof body.auto_sync !== 'boolean') {
+            return { error: 'auto_sync must be a boolean' };
+        }
+        data.auto_sync = body.auto_sync;
     }
 
     if (!partial || body.period_limit !== undefined) {
@@ -454,6 +560,11 @@ class ExternalResolversService {
         if (parsed.error) throw httpError(parsed.error, 400);
 
         const t = now();
+        const autoSync =
+            parsed.data.auto_sync !== undefined ? parsed.data.auto_sync : true;
+        const periodMs =
+            parsed.data.period_ms ?? EXTERNAL_RESOLVER_DEFAULT_PERIOD_MS;
+        const periodStart = autoSync ? t : midnightAlignedPeriodStart(t, periodMs);
         const data = {
             resolver_id: resolverId,
             api_key: parsed.data.api_key,
@@ -461,11 +572,11 @@ class ExternalResolversService {
             priority: parsed.data.priority ?? 0,
             enabled:
                 parsed.data.enabled !== undefined ? parsed.data.enabled : true,
+            auto_sync: autoSync,
             period_limit: parsed.data.period_limit ?? 0,
             used_count: 0,
-            period_start: t,
-            period_ms:
-                parsed.data.period_ms ?? EXTERNAL_RESOLVER_DEFAULT_PERIOD_MS,
+            period_start: periodStart,
+            period_ms: periodMs,
             last_error: null,
             last_used_at: null,
             created_at: t,
@@ -496,12 +607,15 @@ class ExternalResolversService {
             return serializeKey(key);
         }
 
-        // Optional: reset counter when limit/period changes
-        if (
-            parsed.data.period_limit !== undefined ||
-            parsed.data.period_ms !== undefined
-        ) {
-            // keep used_count; only period_ms/limit change
+        // Switching to manual period: align window to local midnight
+        if (parsed.data.auto_sync === false) {
+            const periodMs =
+                parsed.data.period_ms ??
+                (Number(key.period_ms) || EXTERNAL_RESOLVER_DEFAULT_PERIOD_MS);
+            parsed.data.period_start = midnightAlignedPeriodStart(
+                now(),
+                periodMs
+            );
         }
 
         parsed.data.updated_at = now();
@@ -542,9 +656,15 @@ class ExternalResolversService {
         if (!key) throw httpError('API key not found', 404);
 
         const t = now();
+        const periodMs =
+            Number(key.period_ms) || EXTERNAL_RESOLVER_DEFAULT_PERIOD_MS;
+        const periodStart =
+            key.auto_sync === false
+                ? midnightAlignedPeriodStart(t, periodMs)
+                : t;
         await key.update({
             used_count: 0,
-            period_start: t,
+            period_start: periodStart,
             last_error: null,
             updated_at: t
         });
@@ -684,6 +804,16 @@ class ExternalResolversService {
                     ok: false,
                     skipped: true,
                     reason: 'disabled'
+                });
+                continue;
+            }
+
+            if (key.auto_sync === false) {
+                results.push({
+                    key_id: key.id,
+                    ok: false,
+                    skipped: true,
+                    reason: 'auto_sync_disabled'
                 });
                 continue;
             }
