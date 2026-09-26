@@ -10,6 +10,13 @@ function clearAuthCookies(res) {
     ]);
 }
 
+function handleError(err, res, next) {
+    if (err?.status) {
+        return res.status(err.status).json({ error: err.message });
+    }
+    return next(err);
+}
+
 class AuthController {
     getPublicKey(_req, res) {
         res.json(AuthService.getPublicKey());
@@ -21,10 +28,7 @@ class AuthController {
             const data = await AuthService.login({ username, encryptedPassword });
             return res.json(data);
         } catch (err) {
-            if (err.status) {
-                return res.status(err.status).json({ error: err.message });
-            }
-            return next(err);
+            return handleError(err, res, next);
         }
     }
 
@@ -37,10 +41,7 @@ class AuthController {
             const data = await AuthService.refreshToken(refreshToken);
             return res.json(data);
         } catch (err) {
-            if (err.status) {
-                return res.status(err.status).json({ error: err.message });
-            }
-            return next(err);
+            return handleError(err, res, next);
         }
     }
 
@@ -64,7 +65,8 @@ class AuthController {
 
     async createUser(req, res, next) {
         try {
-            const { username, password: encryptedPassword, role = 'viewer' } = req.body ?? {};
+            const { username, password: encryptedPassword, role = 'viewer' } =
+                req.body ?? {};
             const data = await AuthService.createUser({
                 username,
                 encryptedPassword,
@@ -72,10 +74,7 @@ class AuthController {
             });
             return res.status(201).json(data);
         } catch (err) {
-            if (err.status) {
-                return res.status(err.status).json({ error: err.message });
-            }
-            return next(err);
+            return handleError(err, res, next);
         }
     }
 
@@ -84,10 +83,66 @@ class AuthController {
             const data = await AuthService.getUsers(req.query);
             return res.json(data);
         } catch (err) {
-            if (err.status) {
-                return res.status(err.status).json({ error: err.message });
-            }
-            return next(err);
+            return handleError(err, res, next);
+        }
+    }
+
+    async getUser(req, res, next) {
+        try {
+            const data = await AuthService.getUserById(req.params.id, req.user);
+            return res.json(data);
+        } catch (err) {
+            return handleError(err, res, next);
+        }
+    }
+
+    async updateUser(req, res, next) {
+        try {
+            const data = await AuthService.updateUser(
+                req.user,
+                req.params.id,
+                req.body ?? {}
+            );
+            return res.json(data);
+        } catch (err) {
+            return handleError(err, res, next);
+        }
+    }
+
+    async softDeleteUser(req, res, next) {
+        try {
+            const data = await AuthService.softDeleteUser(
+                req.user,
+                req.params.id
+            );
+            return res.json(data);
+        } catch (err) {
+            return handleError(err, res, next);
+        }
+    }
+
+    async setUserPassword(req, res, next) {
+        try {
+            const data = await AuthService.setUserPassword(
+                req.user,
+                req.params.id,
+                req.body?.password
+            );
+            return res.json(data);
+        } catch (err) {
+            return handleError(err, res, next);
+        }
+    }
+
+    async changeOwnPassword(req, res, next) {
+        try {
+            const data = await AuthService.changeOwnPassword(req.user, {
+                currentPassword: req.body?.currentPassword,
+                newPassword: req.body?.newPassword
+            });
+            return res.json(data);
+        } catch (err) {
+            return handleError(err, res, next);
         }
     }
 }

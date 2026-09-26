@@ -141,6 +141,24 @@ export async function revokeRefreshToken(raw) {
 }
 
 /**
+ * Revoke all active refresh tokens for a user (password change / disable / delete).
+ */
+export async function revokeAllRefreshTokensForUser(userId) {
+    if (!userId) return 0;
+
+    const [n] = await RefreshToken.update(
+        { revoked_at: Date.now() },
+        {
+            where: {
+                user_id: userId,
+                revoked_at: null
+            }
+        }
+    );
+    return n;
+}
+
+/**
  * Rotate: revoke old refresh, issue a new one (recommended on every refresh).
  */
 export async function rotateRefreshToken(raw) {

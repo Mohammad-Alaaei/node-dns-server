@@ -1,23 +1,69 @@
+import { Op } from 'sequelize';
 import { User } from '../../../database/models/index.mjs';
 import { decryptPassword, getPublicKeyPem } from '../auth/crypto.mjs';
-import { accessTokenMeta, issueRefreshToken, revokeRefreshToken, rotateRefreshToken, signAccessToken } from '../auth/jwt.mjs';
+import {
+    accessTokenMeta,
+    issueRefreshToken,
+    revokeRefreshToken,
+    revokeAllRefreshTokensForUser,
+    rotateRefreshToken,
+    signAccessToken
+} from '../auth/jwt.mjs';
 import { hashPassword, verifyPassword } from '../auth/password.mjs';
 import { listQuery } from '../utils/list_query.mjs';
 
-
-const PUBLIC_USER_FIELDS = ['id', 'username', 'role', 'created_at', 'updated_at'];
+const PUBLIC_USER_FIELDS = [
+    'id',
+    'username',
+    'role',
+    'enabled',
+    'deleted_at',
+    'created_at',
+    'updated_at'
+];
 
 const USERS_LIST_SCHEMA = {
     searchable: ['username', 'role'],
-    filterable: ['id', 'username', 'role'],
-    sortable: ['id', 'username', 'role', 'created_at', 'updated_at'],
+    filterable: ['id', 'username', 'role', 'enabled'],
+    sortable: [
+        'id',
+        'username',
+        'role',
+        'enabled',
+        'deleted_at',
+        'created_at',
+        'updated_at'
+    ],
     defaultSort: ['id', 'ASC'],
     fieldTypes: {
         id: 'number',
+        enabled: 'boolean',
+        deleted_at: 'number',
         created_at: 'number',
         updated_at: 'number'
     }
 };
+
+const ASSIGNABLE_ROLES = ['superadmin', 'admin', 'viewer'];
+
+function httpError(message, status = 400) {
+    const err = new Error(message);
+    err.status = status;
+    return err;
+}
+
+function publicUser(user) {
+    const u = user.get ? user.get({ plain: true }) : user;
+    return {
+        id: u.id,
+        username: u.username,
+        role: u.role,
+        enabled: u.enabled !== false,
+        deleted_at: u.deleted_at ?? null,
+        created_at: u.created_at,
+        updated_at: u.updated_at
+    };
+}
 
 function tokenPairResponse(user, accessToken, refresh) {
     const meta = accessTokenMeta();
@@ -30,30 +76,68 @@ function tokenPairResponse(user, accessToken, refresh) {
         user: {
             id: user.id,
             username: user.username,
-            role: user.role
+            role: user.role,
+            enabled: user.enabled !== false
         }
     };
 }
 
 /**
  * Decrypt RSA-OAEP password ciphertext.
- * Returns { password } or throws an error object { message, status }.
  */
 function resolveEncryptedPassword(encryptedPassword) {
     if (!encryptedPassword || typeof encryptedPassword !== 'string') {
-        const err = new Error('password required (base64 RSA-OAEP ciphertext from /api/auth/public-key)');
-        err.status = 400;
-        throw err;
+        throw httpError(
+            'password required (base64 RSA-OAEP ciphertext from /api/auth/public-key)',
+            400
+        );
     }
 
     try {
         return decryptPassword(encryptedPassword);
     } catch {
-        const err = new Error(
-            'Invalid encrypted password — fetch /api/auth/public-key and encrypt with RSA-OAEP SHA-256'
+        throw httpError(
+            'Invalid encrypted password — fetch /api/auth/public-key and encrypt with RSA-OAEP SHA-256',
+            400
         );
-        err.status = 400;
-        throw err;
+    }
+}
+
+function isSystemUser(user) {
+    return !user || user.role === 'system' || user.id === 0;
+}
+
+function assertCanManageTarget(actor, target) {
+    if (isSystemUser(target)) {
+        throw httpError('Cannot manage system user', 403);
+    }
+
+    // Admin cannot touch superadmin accounts
+    if (actor.role === 'admin' && target.role === 'superadmin') {
+        throw httpError('Forbidden', 403);
+    }
+}
+
+/** Superadmin role is immutable via admin APIs. */
+function assertRoleNotLocked(target) {
+    if (target.role === 'superadmin') {
+        throw httpError(
+            'Cannot change role of a superadmin',
+            403
+        );
+    }
+}
+
+/**
+ * Superadmin password can only be changed via POST /change-password (self).
+ * No admin/set-password endpoint may reset it.
+ */
+function assertPasswordNotLocked(target) {
+    if (target.role === 'superadmin') {
+        throw httpError(
+            'Cannot reset superadmin password — use change-password while logged in as that user',
+            403
+        );
     }
 }
 
@@ -68,26 +152,28 @@ class AuthService {
 
     async login({ username, encryptedPassword }) {
         if (!username) {
-            const err = new Error('username and password required');
-            err.status = 400;
-            throw err;
+            throw httpError('username and password required', 400);
         }
 
         const password = resolveEncryptedPassword(encryptedPassword);
 
         const user = await User.findOne({ where: { username } });
 
-        if (!user || user.role === 'system' || user.id === 0) {
-            const err = new Error('Invalid credentials');
-            err.status = 401;
-            throw err;
+        if (isSystemUser(user)) {
+            throw httpError('Invalid credentials', 401);
+        }
+
+        if (user.deleted_at != null) {
+            throw httpError('Invalid credentials', 401);
+        }
+
+        if (user.enabled === false) {
+            throw httpError('Account disabled', 403);
         }
 
         const ok = await verifyPassword(password, user.password_hash);
         if (!ok) {
-            const err = new Error('Invalid credentials');
-            err.status = 401;
-            throw err;
+            throw httpError('Invalid credentials', 401);
         }
 
         const accessToken = signAccessToken(user);
@@ -98,22 +184,28 @@ class AuthService {
 
     async refreshToken(refreshToken) {
         if (!refreshToken) {
-            const err = new Error('refreshToken required');
-            err.status = 400;
-            throw err;
+            throw httpError('refreshToken required', 400);
         }
 
         const rotated = await rotateRefreshToken(refreshToken);
 
         if (!rotated) {
-            const err = new Error('Invalid or expired refresh token');
-            err.status = 401;
-            throw err;
+            throw httpError('Invalid or expired refresh token', 401);
         }
 
-        const accessToken = signAccessToken(rotated.user);
+        const user = rotated.user;
+        if (
+            isSystemUser(user) ||
+            user.deleted_at != null ||
+            user.enabled === false
+        ) {
+            await revokeAllRefreshTokensForUser(user.id);
+            throw httpError('Invalid or expired refresh token', 401);
+        }
 
-        return tokenPairResponse(rotated.user, accessToken, {
+        const accessToken = signAccessToken(user);
+
+        return tokenPairResponse(user, accessToken, {
             refreshToken: rotated.refreshToken,
             refreshExpiresIn: rotated.refreshExpiresIn,
             refreshExpiresAt: rotated.refreshExpiresAt
@@ -128,30 +220,33 @@ class AuthService {
     }
 
     me(user) {
-        return { user };
+        // JWT payload only — no password fields ever
+        return {
+            user: {
+                id: user.id,
+                username: user.username,
+                role: user.role
+            }
+        };
     }
 
     async createUser({ username, encryptedPassword, role = 'viewer' }) {
         if (!username) {
-            const err = new Error('username and password required');
-            err.status = 400;
-            throw err;
+            throw httpError('username and password required', 400);
         }
 
         const password = resolveEncryptedPassword(encryptedPassword);
 
-        const allowed = ['superadmin', 'admin', 'viewer'];
-        if (!allowed.includes(role)) {
-            const err = new Error(`role must be one of: ${allowed.join(', ')}`);
-            err.status = 400;
-            throw err;
+        if (!ASSIGNABLE_ROLES.includes(role)) {
+            throw httpError(
+                `role must be one of: ${ASSIGNABLE_ROLES.join(', ')}`,
+                400
+            );
         }
 
         const existing = await User.findOne({ where: { username } });
         if (existing) {
-            const err = new Error('username already taken');
-            err.status = 409;
-            throw err;
+            throw httpError('username already taken', 409);
         }
 
         const now = Date.now();
@@ -161,25 +256,26 @@ class AuthService {
             username,
             password_hash,
             role,
+            enabled: true,
+            deleted_at: null,
             created_at: now,
             updated_at: now
         });
 
-        return {
-            user: {
-                id: user.id,
-                username: user.username,
-                role: user.role,
-                created_at: user.created_at,
-                updated_at: user.updated_at
-            }
-        };
+        return { user: publicUser(user) };
     }
 
     async getUsers(query) {
+        // Exclude system user; include soft-deleted unless filtered out by client
         const result = await listQuery(
             query,
-            USERS_LIST_SCHEMA,
+            {
+                ...USERS_LIST_SCHEMA,
+                baseWhere: {
+                    id: { [Op.ne]: 0 },
+                    role: { [Op.ne]: 'system' }
+                }
+            },
             ({ where, order, limit, offset }) =>
                 User.findAndCountAll({
                     attributes: PUBLIC_USER_FIELDS,
@@ -191,12 +287,247 @@ class AuthService {
         );
 
         if (result.error) {
-            const err = new Error(result.error);
-            err.status = result.status ?? 400;
+            throw httpError(result.error, result.status ?? 400);
+        }
+
+        result.items = result.items.map(row => publicUser(row));
+        return result;
+    }
+
+    async getUserById(rawId, actor) {
+        const id = Number.parseInt(String(rawId), 10);
+        if (!Number.isFinite(id) || id < 1) {
+            throw httpError('invalid id', 400);
+        }
+
+        const user = await User.findByPk(id, {
+            attributes: PUBLIC_USER_FIELDS
+        });
+
+        if (!user || isSystemUser(user)) {
+            throw httpError('User not found', 404);
+        }
+
+        assertCanManageTarget(actor, user);
+        return { user: publicUser(user) };
+    }
+
+    /**
+     * PATCH user: username?, role?, enabled?
+     * Admin cannot assign superadmin or edit superadmin targets.
+     */
+    async updateUser(actor, rawId, body = {}) {
+        const id = Number.parseInt(String(rawId), 10);
+        if (!Number.isFinite(id) || id < 1) {
+            throw httpError('invalid id', 400);
+        }
+
+        const user = await User.findByPk(id);
+        if (!user || isSystemUser(user)) {
+            throw httpError('User not found', 404);
+        }
+
+        assertCanManageTarget(actor, user);
+
+        const updates = { updated_at: Date.now() };
+
+        if (body.username !== undefined) {
+            if (typeof body.username !== 'string' || !body.username.trim()) {
+                throw httpError('username must be a non-empty string', 400);
+            }
+            const username = body.username.trim();
+            const clash = await User.findOne({
+                where: {
+                    username,
+                    id: { [Op.ne]: id }
+                }
+            });
+            if (clash) {
+                throw httpError('username already taken', 409);
+            }
+            updates.username = username;
+        }
+
+        if (body.role !== undefined) {
+            if (actor.id === id) {
+                throw httpError('Cannot change your own role', 403);
+            }
+            // Superadmin role is locked
+            assertRoleNotLocked(user);
+
+            if (!ASSIGNABLE_ROLES.includes(body.role)) {
+                throw httpError(
+                    `role must be one of: ${ASSIGNABLE_ROLES.join(', ')}`,
+                    400
+                );
+            }
+            if (actor.role === 'admin' && body.role === 'superadmin') {
+                throw httpError('Forbidden', 403);
+            }
+            updates.role = body.role;
+        }
+
+        if (body.enabled !== undefined) {
+            if (typeof body.enabled !== 'boolean') {
+                throw httpError('enabled must be a boolean', 400);
+            }
+            if (actor.id === id) {
+                throw httpError('Cannot enable/disable your own account', 403);
+            }
+            // Superadmin accounts can never be disabled
+            if (user.role === 'superadmin' && body.enabled === false) {
+                throw httpError('Cannot disable a superadmin account', 403);
+            }
+            updates.enabled = body.enabled;
+        }
+
+        try {
+            await user.update(updates);
+        } catch (err) {
+            if (err?.name === 'SequelizeUniqueConstraintError') {
+                throw httpError('username already taken', 409);
+            }
             throw err;
         }
 
-        return result;
+        // Kill sessions if disabled
+        if (updates.enabled === false) {
+            await revokeAllRefreshTokensForUser(id);
+        }
+
+        await user.reload();
+        return { user: publicUser(user) };
+    }
+
+    /**
+     * Soft delete — sets deleted_at, disables account, revokes refresh tokens.
+     */
+    async softDeleteUser(actor, rawId) {
+        const id = Number.parseInt(String(rawId), 10);
+        if (!Number.isFinite(id) || id < 1) {
+            throw httpError('invalid id', 400);
+        }
+
+        if (actor.id === id) {
+            throw httpError('Cannot delete your own account', 400);
+        }
+
+        const user = await User.findByPk(id);
+        if (!user || isSystemUser(user)) {
+            throw httpError('User not found', 404);
+        }
+
+        if (user.deleted_at != null) {
+            throw httpError('User already deleted', 409);
+        }
+
+        assertCanManageTarget(actor, user);
+
+        if (user.role === 'superadmin') {
+            const otherSupers = await User.count({
+                where: {
+                    id: { [Op.ne]: id },
+                    role: 'superadmin',
+                    deleted_at: null
+                }
+            });
+            if (otherSupers < 1) {
+                throw httpError('Cannot delete the last superadmin', 400);
+            }
+        }
+
+        const now = Date.now();
+        await user.update({
+            deleted_at: now,
+            enabled: false,
+            updated_at: now
+        });
+
+        await revokeAllRefreshTokensForUser(id);
+
+        return { ok: true, user: publicUser(user) };
+    }
+
+    /**
+     * Admin sets a new password for a user (no current password required).
+     * Password must be RSA-encrypted ciphertext.
+     */
+    async setUserPassword(actor, rawId, encryptedPassword) {
+        const id = Number.parseInt(String(rawId), 10);
+        if (!Number.isFinite(id) || id < 1) {
+            throw httpError('invalid id', 400);
+        }
+
+        const user = await User.findByPk(id);
+        if (!user || isSystemUser(user)) {
+            throw httpError('User not found', 404);
+        }
+
+        if (user.deleted_at != null) {
+            throw httpError('User is deleted', 400);
+        }
+
+        if (actor.id === id) {
+            throw httpError(
+                'Cannot reset your own password here — use change-password',
+                403
+            );
+        }
+
+        assertCanManageTarget(actor, user);
+        assertPasswordNotLocked(user);
+
+        const password = resolveEncryptedPassword(encryptedPassword);
+        if (typeof password !== 'string' || password.length < 1) {
+            throw httpError('password required', 400);
+        }
+
+        const password_hash = await hashPassword(password);
+        await user.update({
+            password_hash,
+            updated_at: Date.now()
+        });
+
+        await revokeAllRefreshTokensForUser(id);
+
+        return { ok: true };
+    }
+
+    /**
+     * Authenticated user changes own password.
+     * Body: { currentPassword, newPassword } — both RSA-encrypted.
+     */
+    async changeOwnPassword(actor, { currentPassword, newPassword }) {
+        const user = await User.findByPk(actor.id);
+        if (!user || isSystemUser(user) || user.deleted_at != null) {
+            throw httpError('User not found', 404);
+        }
+
+        if (user.enabled === false) {
+            throw httpError('Account disabled', 403);
+        }
+
+        const current = resolveEncryptedPassword(currentPassword);
+        const next = resolveEncryptedPassword(newPassword);
+
+        if (typeof next !== 'string' || next.length < 1) {
+            throw httpError('new password required', 400);
+        }
+
+        const ok = await verifyPassword(current, user.password_hash);
+        if (!ok) {
+            throw httpError('Current password is incorrect', 400);
+        }
+
+        const password_hash = await hashPassword(next);
+        await user.update({
+            password_hash,
+            updated_at: Date.now()
+        });
+
+        await revokeAllRefreshTokensForUser(user.id);
+
+        return { ok: true, message: 'Password updated' };
     }
 }
 
