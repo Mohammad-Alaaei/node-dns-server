@@ -1,7 +1,7 @@
 import * as logger from '../utils/logger.mjs';
 import { config } from '../config/config.mjs';
 
-import { loadRecords, saveRecord } from '../database/repository.mjs';
+import { saveRecord } from '../database/repository.mjs';
 import { mergeRecords } from '../utils/array_utils.mjs';
 import { RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
 import { hasLocalRecord } from '../memory/resolver.mjs';
@@ -61,9 +61,9 @@ async function flushCache() {
                 pendingCache.set(record.domain, record);
             }
         } finally {
-            // Reload from DB — promoteToMemory already serves until this completes
-            await loadRecords();
-
+            // Memory is already current via promoteToMemory.
+            // Do not reload the full store here — that cleared LOCAL records
+            // and created a window where queries fell through to upstream.
             flushing = false;
             flushPromise = null;
         }

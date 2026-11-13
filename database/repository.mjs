@@ -44,8 +44,11 @@ export async function incrementHits(domain) {
 
 export async function loadRecords() {
 
-    store.exactRecords.clear();
-    store.regexRecords.length = 0;
+    // Build into fresh collections, then swap. Never clear the live store
+    // first — with 10k+ records the old clear-then-rebuild left a window
+    // where LOCAL records were invisible and queries fell through to upstream.
+    const nextExact = new Map();
+    const nextRegex = [];
 
     // Prefer LOCAL when ordering so ensureMemoryRecord keeps LOCAL source
     const rows = await Record.findAll({
@@ -81,7 +84,7 @@ export async function loadRecords() {
 
     for (const row of rows) {
         const values = row.values ?? [];
-        const record = ensureMemoryRecord(row);
+        const record = ensureMemoryRecord(row, nextExact, nextRegex);
 
         for (const rv of values) {
 
@@ -149,15 +152,19 @@ export async function loadRecords() {
         }
     }
 
-    store.regexRecords.sort(
+    nextRegex.sort(
         (a, b) => b.domain.length - a.domain.length
     );
+
+    // Atomic swap — queries always see a complete set
+    store.exactRecords = nextExact;
+    store.regexRecords = nextRegex;
 }
 
-function ensureMemoryRecord(row) {
+function ensureMemoryRecord(row, exactRecords, regexRecords) {
     const collection = row.is_regex
-        ? store.regexRecords
-        : store.exactRecords;
+        ? regexRecords
+        : exactRecords;
 
     if (row.is_regex) {
         let record = collection.find(r => r.domain === row.domain);
@@ -286,15 +293,14 @@ async function upsertRecordValue(
     selected = false
 ) {
     const now = Date.now();
-    const serverId = dnsServerId ?? null;
 
-    const lookup = {
-        record_id: recordId,
-        dns_server_id: serverId,
-        type
-    };
-
-    let existing = await RecordValue.findOne({ where: lookup });
+    const existing = await RecordValue.findOne({
+        where: {
+            record_id: recordId,
+            dns_server_id: dnsServerId ?? null,
+            type
+        }
+    });
 
     let ttl = existing?.ttl ?? null;
     let expiresAt = existing?.expires_at ?? null;
@@ -336,7 +342,6 @@ async function upsertRecordValue(
         selectedValue = existing?.selected ?? !!selected;
     }
     else {
-        // TIMEOUT / NXDOMAIN / SERVFAIL / REFUSED / empty
         if (existing && existing.last_success_at != null) {
             value = existing.value;
             ttl = existing.ttl;
@@ -368,25 +373,13 @@ async function upsertRecordValue(
         return;
     }
 
-    try {
-        await RecordValue.create({
-            record_id: recordId,
-            dns_server_id: serverId,
-            type,
-            ...payload,
-            created_at: now
-        });
-    } catch (err) {
-        // Concurrent insert won the race — update that row instead
-        if (err.name === 'SequelizeUniqueConstraintError') {
-            existing = await RecordValue.findOne({ where: lookup });
-            if (existing) {
-                await existing.update(payload);
-                return;
-            }
-        }
-        throw err;
-    }
+    await RecordValue.create({
+        record_id: recordId,
+        dns_server_id: dnsServerId ?? null,
+        type,
+        ...payload,
+        created_at: now
+    });
 }
 
 async function clearSelected(recordId, type) {
@@ -404,7 +397,6 @@ async function clearSelected(recordId, type) {
 async function updateRecordSource(recordId) {
     const record = await Record.findByPk(recordId);
 
-    // LOCAL is permanent unless changed manually.
     if (!record || record.source === RECORD_SOURCE.LOCAL) {
         return;
     }
@@ -416,7 +408,7 @@ async function updateRecordSource(recordId) {
 
     const source =
         rows.length &&
-            rows.every(r => r.status === RECORD_STATUS.FILTERED)
+        rows.every(r => r.status === RECORD_STATUS.FILTERED)
             ? RECORD_SOURCE.FILTERED
             : RECORD_SOURCE.CACHE;
 
