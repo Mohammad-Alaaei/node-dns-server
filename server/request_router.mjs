@@ -43,7 +43,7 @@ export async function handleRequest(message, remote) {
         domain = normalizeDomain(domain);
 
         logger.info(
-            `Requested for: ${domain} (${DNS_TYPES[question.type] ?? question.type})${debug ? ' [debug]' : ''}`
+            `Requested for: ${domain} (${DNS_TYPES[question.type] ?? question.type}) from ${remote.address}${debug ? ' [debug]' : ''}`
         );
 
         let response;
