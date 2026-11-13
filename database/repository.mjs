@@ -332,14 +332,32 @@ async function upsertRecordValue(
         selectedValue = !!selected;
     }
     else if (status === RECORD_STATUS.FILTERED) {
-        if (existing?.value != null) {
+        // Store the filtered addresses for visibility, but do not mark them
+        // stale and do not select them. Stale belongs on the previous SUCCESS.
+        if (values.length) {
+            ttl = Math.min(...values.map(v => v.ttl ?? 60));
+            expiresAt = Math.min(
+                ...values.map(v => v.expiresAt ?? (now + ttl * 1000))
+            );
+            switch (type) {
+                case 'A':
+                case 'AAAA':
+                    value = JSON.stringify(values.map(v => v.address));
+                    break;
+                case 'CNAME':
+                    value = JSON.stringify(values.map(v => v.domain));
+                    break;
+                default:
+                    value = JSON.stringify(values);
+            }
+        } else if (existing?.value != null) {
             value = existing.value;
             ttl = existing.ttl;
             expiresAt = existing.expires_at;
-            lastSuccessAt = existing.last_success_at;
         }
-        isStale = true;
-        selectedValue = existing?.selected ?? !!selected;
+        isStale = false;
+        selectedValue = false;
+        lastSuccessAt = existing?.last_success_at ?? null;
     }
     else {
         if (existing && existing.last_success_at != null) {
@@ -454,6 +472,20 @@ export async function saveRecord(record) {
     if (record.CNAME?.length) {
         await clearSelected(recordId, 'CNAME');
         await upsertRecordValue(recordId, record.dnsServerId, 'CNAME', status, record.CNAME, true);
+    }
+
+    // A filtered refresh means the previous SUCCESS is now stale
+    // (still the answer to serve), not the filtered row itself.
+    if (status === RECORD_STATUS.FILTERED) {
+        await RecordValue.update(
+            { is_stale: true, updated_at: Date.now() },
+            {
+                where: {
+                    record_id: recordId,
+                    status: RECORD_STATUS.SUCCESS
+                }
+            }
+        );
     }
 
     await updateRecordSource(recordId);

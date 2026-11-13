@@ -15,7 +15,7 @@ import {
     MAX_REWRITE_DEPTH
 } from '../services/rewrite_service.mjs';
 import { Packet } from 'dns2';
-import { RECORD_SOURCE, REWRITE_ACTIONS } from '../config/constants.mjs';
+import { RECORD_SOURCE, RECORD_STATUS, REWRITE_ACTIONS } from '../config/constants.mjs';
 
 const SERVER_IP = config.server.ip;
 
@@ -27,39 +27,38 @@ export function selectServer(record, type) {
 
     const now = Date.now();
 
+    const isFiltered = (s) =>
+        s.status === RECORD_STATUS.FILTERED || s.status === 'FILTERED';
+
+    const hasFresh = (s) =>
+        s[type]?.some(r => r.expiresAt > now) ||
+        s.CNAME?.some(r => r.expiresAt > now);
+
+    const hasAny = (s) =>
+        (s[type]?.length || 0) > 0 || (s.CNAME?.length || 0) > 0;
+
+    // 1. Selected fresh SUCCESS
     let server = record.servers.find(s =>
-        s.selected &&
-        !s.isStale &&
-        (
-            s[type].some(r => r.expiresAt > now) ||
-            s.CNAME.some(r => r.expiresAt > now)
-        )
+        s.selected && !isFiltered(s) && !s.isStale && hasFresh(s)
     );
+    if (server) return server;
 
-    if (server) {
-        return server;
-    }
-
+    // 2. Any fresh SUCCESS
     server = record.servers.find(s =>
-        !s.isStale &&
-        (
-            s[type].some(r => r.expiresAt > now) ||
-            s.CNAME.some(r => r.expiresAt > now)
-        )
+        !isFiltered(s) && !s.isStale && hasFresh(s)
     );
+    if (server) return server;
 
-    if (server) {
-        return server;
-    }
+    // 3. Last good SUCCESS, even if expired/stale.
+    //    A filtered refresh must not replace this.
+    const success = record.servers
+        .filter(s => !isFiltered(s) && hasAny(s))
+        .sort((a, b) => (b.lastSuccessAt ?? 0) - (a.lastSuccessAt ?? 0));
+    if (success.length) return success[0];
 
+    // 4. FILTERED only when there has never been a SUCCESS
     return record.servers
-        .filter(s =>
-            s.isStale &&
-            (
-                s[type].length ||
-                s.CNAME.length
-            )
-        )
+        .filter(s => isFiltered(s) && hasAny(s))
         .sort((a, b) => (b.lastSuccessAt ?? 0) - (a.lastSuccessAt ?? 0))[0] ?? null;
 }
 

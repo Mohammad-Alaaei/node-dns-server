@@ -88,6 +88,29 @@ function promoteToMemory(record, dnsServerId) {
 
     let mem = store.exactRecords.get(domain);
 
+    // Filtered refresh must not replace a previous SUCCESS.
+    // Mark the last good data stale (still servable) and keep it selected.
+    if (record.source === RECORD_SOURCE.FILTERED && mem) {
+        const hasSuccess = mem.servers.some(s =>
+            s.status !== RECORD_STATUS.FILTERED &&
+            ((s.A?.length || 0) > 0 || (s.AAAA?.length || 0) > 0 || (s.CNAME?.length || 0) > 0)
+        );
+
+        if (hasSuccess) {
+            for (const s of mem.servers) {
+                if (s.status !== RECORD_STATUS.FILTERED) {
+                    s.isStale = true;
+                }
+                s.selected = false;
+            }
+            const best = mem.servers
+                .filter(s => s.status !== RECORD_STATUS.FILTERED)
+                .sort((a, b) => (b.lastSuccessAt ?? 0) - (a.lastSuccessAt ?? 0))[0];
+            if (best) best.selected = true;
+            return;
+        }
+    }
+
     if (!mem) {
         mem = {
             id: null,

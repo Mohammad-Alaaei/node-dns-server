@@ -1,4 +1,4 @@
-import { RECORD_SOURCE } from '../config/constants.mjs';
+import { RECORD_SOURCE, RECORD_STATUS } from '../config/constants.mjs';
 import { store } from './store.mjs';
 import { normalizeDomain } from '../utils/domain_utils.mjs';
 
@@ -17,8 +17,10 @@ function isExpired(values) {
 
 /**
  * LOCAL: valid when requested type or CNAME exists (never expires).
- * CACHE/FILTERED: valid when non-expired non-stale values exist,
- * or stale values exist (FILTERED fallback).
+ * CACHE: valid when a non-expired SUCCESS exists.
+ *        Expired SUCCESS is not valid here (triggers a refresh) but is still
+ *        preferred over FILTERED by selectServer if the refresh fails.
+ * FILTERED-only: valid so we don't hammer upstream when nothing better exists.
  */
 function isRecordValid(record, type) {
 
@@ -34,31 +36,30 @@ function isRecordValid(record, type) {
         );
     }
 
+    const isFiltered = (s) =>
+        s.status === RECORD_STATUS.FILTERED || s.status === 'FILTERED';
+
+    const hasType = (s) =>
+        (s[type] && s[type].length > 0) ||
+        (s.CNAME && s.CNAME.length > 0);
+
+    const success = [];
+    const filtered = [];
+
     for (const server of record.servers) {
-
-        const hasType =
-            (server[type] && server[type].length > 0) ||
-            (server.CNAME && server.CNAME.length > 0);
-
-        if (!hasType) {
-            continue;
-        }
-
-        // Stale FILTERED — still servable
-        if (server.isStale) {
-            return true;
-        }
-
-        if (server.CNAME.length && !isExpired(server.CNAME)) {
-            return true;
-        }
-
-        if (server[type].length && !isExpired(server[type])) {
-            return true;
-        }
+        if (!hasType(server)) continue;
+        if (isFiltered(server)) filtered.push(server);
+        else success.push(server);
     }
 
-    return false;
+    if (success.length) {
+        return success.some(s =>
+            (s.CNAME?.length && !isExpired(s.CNAME)) ||
+            (s[type]?.length && !isExpired(s[type]))
+        );
+    }
+
+    return filtered.length > 0;
 }
 
 /**
@@ -66,6 +67,7 @@ function isRecordValid(record, type) {
  * Exact match first, then regex (longer patterns preferred via load sort).
  */
 export function findRecord(domain, type) {
+
     domain = normalizeDomain(domain);
 
     const exact = store.exactRecords.get(domain);
@@ -91,6 +93,7 @@ export function findRecord(domain, type) {
  * Find stored non-LOCAL record even if expired (preferred-server re-resolve).
  */
 export function findStoredRecord(domain) {
+
     domain = normalizeDomain(domain);
 
     const exact = store.exactRecords.get(domain);
@@ -115,6 +118,7 @@ export function findStoredRecord(domain) {
  * True if domain has a LOCAL record in memory (any type).
  */
 export function hasLocalRecord(domain) {
+
     domain = normalizeDomain(domain);
 
     const exact = store.exactRecords.get(domain);
@@ -158,9 +162,6 @@ export function findServerById(dnsServerId) {
     return null;
 }
 
-/**
- * Preferred (selected) upstream for an existing record + type.
- */
 export function getPreferredServer(record, type) {
 
     if (!record?.servers?.length) {
@@ -178,9 +179,11 @@ export function getPreferredServer(record, type) {
 }
 
 export function findCustomDnsServer(domain) {
+
     domain = normalizeDomain(domain);
 
     for (const group of store.customDnsServers) {
+
         const matched = group.isRegex
             ? group.regex.test(domain)
             : normalizeDomain(group.domain) === domain;

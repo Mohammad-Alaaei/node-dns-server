@@ -1,9 +1,11 @@
 import * as logger from '../utils/logger.mjs';
-import { decorateDebugResponse } from '../server/response_builder.mjs';
-import { handleUpstreamResponse } from './response_parser.mjs';
+import { decorateDebugResponse, createRecordResponse } from '../server/response_builder.mjs';
+import { handleUpstreamResponse, evaluateUpstreamHandling } from './response_parser.mjs';
 import { forwardToExternalDns } from './upstream_resolver.mjs';
 import { selectUpstream } from './upstream_selector.mjs';
 import { normalizeDomain } from '../utils/domain_utils.mjs';
+import { findStoredRecord } from '../memory/resolver.mjs';
+import { RECORD_STATUS } from '../config/constants.mjs';
 
 export async function handleExternalRequests(
     request,
@@ -45,6 +47,32 @@ export async function handleExternalRequests(
         upstream.custom,
         upstream.server.id
     );
+
+    // Filtered upstream must not replace a previous SUCCESS.
+    // Serve the last good data (CNAME or A) instead of the sinkhole answer.
+    const { isFiltered } = evaluateUpstreamHandling(response.packet, upstream.custom);
+    if (isFiltered && type) {
+        const stored = findStoredRecord(domain);
+        if (stored) {
+            const built = createRecordResponse(request, stored, type);
+            const srv = built.server;
+            const isFilteredServer =
+                srv?.status === RECORD_STATUS.FILTERED || srv?.status === 'FILTERED';
+            if (
+                srv &&
+                !isFilteredServer &&
+                ((srv[type]?.length || 0) > 0 || (srv.CNAME?.length || 0) > 0)
+            ) {
+                logger.info(
+                    `FILTERED refresh ignored for ${domain}; serving last SUCCESS`
+                );
+                return {
+                    packet: built.packet,
+                    buffer: null
+                };
+            }
+        }
+    }
 
     if (!debug) {
         return {
