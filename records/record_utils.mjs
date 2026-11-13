@@ -6,7 +6,7 @@ import {
     getPreferredServer,
     hasLocalRecord
 } from '../memory/resolver.mjs';
-import { appendDebugRecords, createRecordResponse } from '../server/response_builder.mjs';
+import { appendDebugRecords, createRecordResponse, createEmptyResponse } from '../server/response_builder.mjs';
 import { handleExternalRequests } from '../services/upstream_service.mjs';
 import {
     resolveRewrite,
@@ -75,6 +75,68 @@ export async function handleLocalRecord({
     debug = false,
     _rewriteDepth = 0
 }) {
+
+    // LOCAL is authoritative for the domain. Return only what is defined
+    // (or an empty answer). Never forward to upstream, and never let a
+    // rewrite rule replace the static answer.
+    if (hasLocalRecord(domain)) {
+        const record = findRecord(domain, type);
+
+        if (record && record.source === RECORD_SOURCE.LOCAL) {
+            const { packet, server, answers } = createRecordResponse(
+                request,
+                record,
+                type
+            );
+
+            if (server && (
+                server[type].length ||
+                server.CNAME.length
+            )) {
+                const inlineAnswers = answers.join(', ');
+                logger.info(`FOUND: ${inlineAnswers ? inlineAnswers : '[N/A]'}`);
+                console.log('=============');
+
+                if (debug) {
+                    const debugAnswers = packet.answers.map(answer => {
+                        switch (answer.type) {
+                            case Packet.TYPE.A:
+                            case Packet.TYPE.AAAA:
+                                return answer.address;
+
+                            case Packet.TYPE.CNAME:
+                            case Packet.TYPE.PTR:
+                                return answer.domain;
+
+                            case Packet.TYPE.MX:
+                                return answer.exchange;
+
+                            default:
+                                return null;
+                        }
+                    }).filter(Boolean);
+
+                    appendDebugRecords(packet, request, {
+                        resolver: 'Local',
+                        server: SERVER_IP,
+                        type,
+                        answers: debugAnswers
+                    });
+                }
+
+                return {
+                    packet,
+                    buffer: null
+                };
+            }
+        }
+
+        logger.info(`LOCAL ${domain} has no ${type}; returning empty`);
+        return {
+            packet: createEmptyResponse(request),
+            buffer: null
+        };
+    }
 
     // Rewrite rules run early for A/AAAA/CNAME so the original name is never
     // sent upstream when a cname_rewrite matches.
@@ -163,15 +225,6 @@ export async function handleLocalRecord({
                 buffer: null
             };
         }
-
-        // LOCAL exists but this type is missing — only then allow upstream.
-        // Do not re-resolve LOCAL when type is present but empty answer path failed.
-        if (record.source === RECORD_SOURCE.LOCAL) {
-            logger.info(`LOCAL ${domain} has no ${type}; forwarding upstream`);
-        }
-    } else if (hasLocalRecord(domain)) {
-        // LOCAL row exists but isRecordValid failed for this type → upstream for missing type only
-        logger.info(`LOCAL ${domain} missing type ${type}; forwarding upstream`);
     }
 
     const stored = findStoredRecord(domain);
